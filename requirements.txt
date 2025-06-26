@@ -1,0 +1,9 @@
+torch
+numpy
+nltk
+langchain
+langchain-ollama
+langchain-chroma
+langchain-text-splitters
+lxml
+bs4

@@ -1,0 +1,71 @@
+#!/usr/bin/env node
+require("dotenv").config();
+
+if (process.env.SENTRY_DSN) {
+  const Raven = require("raven");
+  Raven.config(process.env.SENTRY_DSN).install();
+}
+
+const converter = require("../src/converter");
+const program = require("commander");
+
+async function main(argv) {
+  program
+    .version("0.0.1")
+    .usage("[options] <tex file or directory> <output directory>")
+    .option("-o, --output <dir>", "(deprecated) Output directory")
+    .option(
+      "--no-post-processing",
+      "Raw LaTeXML output, without filters or postprocessors (for debugging)"
+    )
+    .option(
+      "--css <path>",
+      "URL or path to external CSS to use instead of the default CSS. If passed, the defaut CSS is not copied to the output directory."
+    )
+    .option(
+      "--javascript <path>",
+      "URL or path to external JavaScript to use instead of the default JS. If not passed, the default JS is not copied to the output directory."
+    )
+    .option(
+      "--biblio-glutton-url <url>",
+      "URL to a biblio-glutton instance to resolve citations into links"
+    )
+    .option(
+      "--grobid-url <url>",
+      "URL to a grobid instance to resolve citations into links"
+    )
+    .parse(argv);
+
+  const input = program.args[0];
+  const output = program.args[1] || program.output;
+  const filename = program.args[2] || "index.html";
+
+  if (!input || !output) {
+    program.outputHelp();
+    return 1;
+  }
+
+  const options = {
+    input: input,
+    output: output,
+    filename: filename,
+    postProcessing: program.postProcessing,
+    externalCSS: program.css,
+    externalJavaScript: program.javascript,
+    biblioGluttonUrl: program.biblioGluttonUrl
+      ? program.biblioGluttonUrl
+      : process.env.BIBLIO_GLUTTON_URL,
+    grobidUrl: program.grobidUrl ? program.grobidUrl : process.env.GROBID_URL,
+  };
+
+  const out = await converter.render(options);
+  console.log("💃  Document successfully rendered to", out);
+  return 0;
+}
+
+main(process.argv)
+  .then((exitCode) => process.exit(exitCode))
+  .catch((err) => {
+    console.error("Engrafo rendering failed:", err);
+    process.exit(1);
+  });

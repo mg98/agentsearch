@@ -1,0 +1,10 @@
+@import "../fonts";
+
+.ltx_caption {
+  @include font-caption();
+
+  * {
+    // Too many captions are the wrong font size
+    font-size: inherit !important;
+  }
+}

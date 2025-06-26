@@ -1,0 +1,74 @@
+@import "../media";
+
+@mixin document-width($textWidth, $pageWidth) {
+  width: $pageWidth;
+
+  // Everything is width of text
+  & > *,
+  & section > * {
+    width: $textWidth;
+  }
+
+  // ... except sections, because they can contain other stuff which might
+  // be wider than the text
+  & > section,
+  & section > section {
+    width: $pageWidth;
+  }
+
+  // ... and except the stuff we actually want to be wider than the text
+  .ltx_biblist,
+  .ltx_figure,
+  .ltx_engrafo_equation_container,
+  .ltx_listing,
+  .ltx_table,
+  .ltx_title {
+    width: $pageWidth;
+  }
+
+  // Subfigures contain .ltx_figure, which we don't want to be $pageWidth wide
+  .ltx_subfigure .ltx_figure {
+    width: auto;
+  }
+
+  // Paragraph and subparagraph titles we want to float
+  .ltx_title_paragraph,
+  .ltx_title_subparagraph {
+    width: auto;
+  }
+}
+
+.ltx_document {
+  background: white;
+  margin-top: 4em;
+  margin-bottom: 4em;
+
+  width: auto;
+  margin-left: 16px;
+  margin-right: 16px;
+  box-sizing: border-box;
+
+  @include media(">=tablet") {
+    width: 650px;
+    margin-left: auto;
+    margin-right: auto;
+  }
+
+  @include media(">=desktop") {
+    @include document-width(700px, 900px);
+    margin-left: auto;
+    margin-right: auto;
+  }
+
+  @include media(">=huge") {
+    @include document-width(700px, 1100px);
+  }
+
+  // FIXME: These are set by various things and come from ltx:note in the frontmatter.
+  // There is a journal one in the 1803.07574 integration test. acmart.cls also has them
+  // (e.g. 1806.07527)
+  // Maybe we should figure out the right thing to do with them? For now, just hide.
+  & > .ltx_note {
+    display: none;
+  }
+}

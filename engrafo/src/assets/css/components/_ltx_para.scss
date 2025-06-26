@@ -1,0 +1,31 @@
+.ltx_para {
+  @include font-body();
+
+  // HACK: stop inline math from overflowing scrolling whole page on mobile
+  // Disabled because this stops paragraph headings from working.
+  // @include media("<desktop") {
+  //   max-width: 100%;
+  //   overflow-x: auto;
+  //   overflow-y: hidden;
+  // }
+}
+
+.ltx_p {
+  margin: 0;
+}
+
+// This is an attempt to simulate the way LaTeX does indents in PDFs.
+// It goes something like this:
+// - Within a section, first paragraph does not have indent
+// - Subsequent paragraphs do have indents, but not anything within those paragraph.
+//   So, for example, if there is a displayed formula, the text following it is not indented,
+//   even though it looks like a new paragraph and is in a ltx_p
+//
+.ltx_para + .ltx_para {
+  & > .ltx_p:first-child {
+    text-indent: 2em;
+  }
+  &.ltx_noindent > .ltx_p:first-child {
+    text-indent: 0;
+  }
+}

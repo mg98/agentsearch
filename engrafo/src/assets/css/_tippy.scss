@@ -1,0 +1,26 @@
+@import url("./vendor/tippy.css");
+@import url("./vendor/tippy-light-border.css");
+@import "./fonts";
+
+.tippy-tooltip {
+  @import "./components/link";
+
+  // 1512.03385 changes size of citations so also apply to children.
+  // Need a general solution to this.
+  &,
+  * {
+    @include font-sans();
+  }
+
+  .tippy-content {
+    padding: 0.5em;
+    text-align: left;
+    .ltx_bibitem {
+      margin-bottom: 1em;
+
+      &:last-child {
+        margin-bottom: 0;
+      }
+    }
+  }
+}

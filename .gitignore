@@ -1,0 +1,6 @@
+**/.DS_Store
+**/__pycache__/
+chroma_db/
+papers/
+!papers/src/.gitkeep
+!papers/html/.gitkeep

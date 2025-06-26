@@ -1,0 +1,18 @@
+@import "../colors";
+
+a {
+  color: $linkColor;
+  text-decoration: none;
+
+  /* Slice off long URLs because they mess up the mobile design */
+  word-break: break-word;
+
+  &:hover {
+    text-decoration: underline;
+  }
+
+  // monospace URLs look stupid
+  &.ltx_font_typewriter {
+    font-family: inherit;
+  }
+}

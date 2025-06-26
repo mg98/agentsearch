@@ -1,0 +1,25 @@
+@import "../fonts";
+
+.ltx_abstract {
+  border: 1px solid #666;
+  padding: 16px;
+  margin-bottom: 2em;
+
+  @include font-body();
+
+  @include media(">=tablet") {
+    padding: 1.5em;
+  }
+
+  .ltx_title_abstract {
+    @include font-heading();
+
+    margin: 0 0 1em 0;
+  }
+
+  // Footnotes collide with border
+  // Maybe they should just be tooltips?
+  .ltx_note .ltx_note_outer {
+    width: 160px;
+  }
+}

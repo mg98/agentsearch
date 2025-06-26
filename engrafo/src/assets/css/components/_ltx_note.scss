@@ -1,0 +1,62 @@
+@import "../colors";
+@import "../fonts";
+
+.ltx_note {
+  position: relative;
+
+  & > .ltx_note_mark {
+    display: none;
+
+    @include media(">=desktop") {
+      display: inline;
+    }
+  }
+
+  .ltx_engrafo_note_mark_tooltip {
+    color: $linkColor;
+
+    @include media(">=desktop") {
+      display: none;
+    }
+  }
+
+  .ltx_note_outer {
+    @include font-sans();
+
+    float: right;
+    clear: right;
+    position: relative;
+    width: 200px;
+    margin-right: -216px;
+    margin-top: -1em;
+    padding: 2em 0;
+    text-indent: 0;
+
+    // It inherits from wherever the footnote is, so we need to reset stuff.
+    font-weight: normal;
+    font-style: normal;
+
+    // .ltx_note_mark and .ltx_tag normally display the same thing, except
+    // sometimes just .ltx_note_mark exists, so use that to make the footnote
+    // heading
+    .ltx_note_mark {
+      display: block;
+      vertical-align: inherit;
+      font-size: inherit;
+    }
+
+    .ltx_tag {
+      display: none;
+    }
+
+    // Hide on mobile
+    @include media("<desktop") {
+      display: none;
+    }
+
+    // Push out a bit on larger screens
+    @include media(">=1200px") {
+      margin-right: -300px;
+    }
+  }
+}

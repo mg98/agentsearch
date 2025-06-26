@@ -1,0 +1,67 @@
+// TODO: don't set any global styles
+body {
+  margin: 0;
+}
+
+// Contain everything inside .ltx_page_main
+.ltx_page_main {
+  text-rendering: optimizeLegibility;
+
+  // .ltx_document is the root element for most of the document, containing the grid layout
+  @import "./components/ltx_document";
+
+  @import "./components/errors";
+  @import "./components/link";
+  @import "./components/ltx_abstract";
+  @import "./components/ltx_align";
+  @import "./components/ltx_appendix";
+  @import "./components/ltx_authors";
+  @import "./components/ltx_bibliography";
+  @import "./components/ltx_caption";
+  @import "./components/ltx_cite";
+  @import "./components/ltx_classification";
+  @import "./components/ltx_date";
+  @import "./components/ltx_engrafo_author_notes";
+  @import "./components/ltx_engrafo_equation_container";
+  @import "./components/ltx_equation";
+  @import "./components/ltx_equationgroup";
+  @import "./components/ltx_enumerate";
+  @import "./components/ltx_figure";
+  @import "./components/ltx_float";
+  @import "./components/ltx_font";
+  @import "./components/ltx_framed";
+  @import "./components/ltx_glossary";
+  @import "./components/ltx_indent";
+  @import "./components/ltx_index";
+  @import "./components/ltx_itemize";
+  @import "./components/ltx_keywords";
+  @import "./components/ltx_listing";
+  @import "./components/ltx_note";
+  @import "./components/ltx_page_footer";
+  @import "./components/ltx_para";
+  @import "./components/ltx_paragraph";
+  @import "./components/ltx_proof";
+  @import "./components/ltx_quote";
+  @import "./components/ltx_red";
+  @import "./components/ltx_runin";
+  @import "./components/ltx_section";
+  @import "./components/ltx_subsection";
+  @import "./components/ltx_subsubsection";
+  @import "./components/ltx_table";
+  @import "./components/ltx_tabular";
+  @import "./components/ltx_theorem";
+  @import "./components/ltx_title_appendix";
+  @import "./components/ltx_title_bibliography";
+  @import "./components/ltx_title_chapter";
+  @import "./components/ltx_title_document";
+  @import "./components/ltx_title_paragraph";
+  @import "./components/ltx_title_section";
+  @import "./components/ltx_title_subparagraph";
+  @import "./components/ltx_title_subsection";
+  @import "./components/ltx_title_subsubsection";
+  @import "./components/ltx_TOC";
+  @import "./components/ltx_verbatim";
+}
+
+// Tippy tooltips get appended to <body>
+@import "./tippy";

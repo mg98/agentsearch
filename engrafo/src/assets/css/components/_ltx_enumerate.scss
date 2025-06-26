@@ -1,0 +1,5 @@
+@import "../lists.scss";
+
+.ltx_enumerate {
+  @include list();
+}

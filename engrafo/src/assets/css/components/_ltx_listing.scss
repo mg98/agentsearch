@@ -1,0 +1,39 @@
+@import "../fonts";
+
+.ltx_listing {
+  @include font-monospace();
+
+  padding-left: 3em;
+  margin: 4rem 0;
+
+  max-width: 100%;
+  overflow-x: auto;
+  overflow-y: hidden;
+
+  // Remove download button. It's much easier to copy and paste
+  .ltx_listing_data {
+    display: none;
+  }
+
+  .ltx_listingline {
+    white-space: nowrap;
+    min-height: 1em;
+  }
+
+  // Default is assumed to be &.ltx_list_numbers_left. Sometimes this class
+  // is omitted. (e.g. in algorithms)
+  .ltx_listingline .ltx_tag {
+    background-color: transparent;
+    margin-left: -4em;
+    width: 2.5em;
+    position: absolute;
+    text-align: right;
+  }
+  &.ltx_lst_numbers_right .ltx_listingline .ltx_tag {
+    background-color: transparent;
+    width: 2.5em;
+    position: absolute;
+    right: 4em;
+    text-align: right;
+  }
+}
