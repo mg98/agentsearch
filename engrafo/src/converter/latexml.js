@@ -22,12 +22,22 @@ function createChildProcess({
 }) {
   // prettier-ignore
   const latexmlArgs = [
+
+    "--preload=[nobibtex,ids,localrawstyles,mathlexemes,magnify=2,zoomout=2,tokenlimit=99999999,iflimit=1499999,absorblimit=1299999,pushbacklimit=599999]latexml.sty",
+    "--path=/opt/arxmliv-bindings/bindings",
+    "--path=/opt/arxmliv-bindings/supported_originals",
+    
     "--format=html5",
     "--nographicimages",
     "--nopictureimages", 
-    "--nosvg",
     "--nodefaultresources",
     "--nonumbersections",
+    "--noparse",
+    "--nomathimages",
+    "--nomathsvg",
+    "--nopresentationmathml",
+    "--nocomments",
+    "--nocontentmathml",
     "--timestamp", "0",
     "--path", "/app/latexml/packages/",
     "--preload", "/app/latexml/engrafo.ltxml",
@@ -81,15 +91,13 @@ function createChildProcess({
  * @param {string} [options.cssPath]
  * @param {string} [options.javaScriptPath]
  */
-function render({ texPath, outputDir, filename = "index.html", cssPath, javaScriptPath }) {
+function render({ texPath, outputDir, filename = "index.html" }) {
   const htmlPath = path.join(outputDir, filename);
 
   const latexmlc = createChildProcess({
     texPath,
     outputDir,
-    htmlPath,
-    cssPath,
-    javaScriptPath,
+    htmlPath
   });
 
   const stdoutReadline = readline.createInterface({ input: latexmlc.stdout });

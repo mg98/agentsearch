@@ -37,8 +37,7 @@ python -m agentsearch.dataset.download
 
 ### 2. Convert LaTeX to HTML
 
-This will convert all papers in `papers/src` to single HTML files, exported to `papers/html/{authorId}/{arxivPaperId}.html`.
-It runs these conversions in isolated docker containers for each paper individually. Execution is parallelized on all available CPU cores.
+This will convert all papers in `papers/src` to single HTML files, exported to `papers/html/{authorId}/{arxivPaperId}.html`. The conversion is run in a Docker container and parallelized over all available CPU cores.
 
 ```
 python -m agentsearch.dataset.convert

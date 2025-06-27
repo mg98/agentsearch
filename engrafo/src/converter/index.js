@@ -50,8 +50,6 @@ async function render({
   output,
   filename,
   postProcessing,
-  externalCSS,
-  externalJavaScript,
   biblioGluttonUrl,
   grobidUrl,
 }) {
@@ -62,15 +60,6 @@ async function render({
   const inputDir = await io.prepareInputDirectory(input);
   const texPath = await io.pickLatexFile(inputDir);
   const outputDir = await io.prepareOutputDirectory(output);
-
-  // If there are external assets, don't let LaTeXML copy it to the output
-  // directory - we will handle it ourselves
-  // Otherwise, link directly to the built asset. Absolute path, assuming
-  // latexml is always run in Docker.
-  const cssPath = externalCSS ? null : "/app/dist/css/index.css";
-  const javaScriptPath = externalJavaScript
-    ? null
-    : "/app/dist/javascript/index.js";
 
   console.log(`Rendering tex file ${texPath} to ${outputDir}`);
   const htmlPath = await latexml.render({
