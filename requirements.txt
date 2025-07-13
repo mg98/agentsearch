@@ -1,9 +1,17 @@
 torch
+torch-geometric
 numpy
 nltk
 langchain
 langchain-ollama
+langchain-openai
 langchain-chroma
 langchain-text-splitters
 lxml
 bs4
+deepeval
+pandas
+pydantic
+selenium>=4.0.0
+webdriver-manager
+openai

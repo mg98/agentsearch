@@ -3,6 +3,11 @@ import subprocess
 import shutil
 
 if __name__ == "__main__":
+    response = input("This will delete papers/html, are you sure you want to proceed? (y/n): ")
+    if response.lower() != 'y':
+        print("Aborting...")
+        exit()
+
     # Clear existing HTML files
     shutil.rmtree("papers/html", ignore_errors=True)
     
