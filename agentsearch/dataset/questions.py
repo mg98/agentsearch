@@ -1,12 +1,8 @@
 import pandas as pd
-from ast import literal_eval
 from langchain_chroma import Chroma
-from langchain_ollama import OllamaEmbeddings
 from dataclasses import dataclass
 import numpy as np
-
-db_location = "./chroma_db"
-embeddings = OllamaEmbeddings(model="mxbai-embed-large")
+from agentsearch.utils.globals import db_location, embeddings
 
 questions_df = pd.read_csv('data/questions.csv', index_col=0)
 questions_store = Chroma(
@@ -34,11 +30,13 @@ class Question:
         return question
     
     @classmethod
-    def all(cls) -> list['Question']:
+    def all(cls, from_agents: list[int] = None, questions_per_agent: int = 100) -> list['Question']:
         questions = []
-        for idx, _ in questions_df.iterrows():
-            question = cls.from_id(idx)
-            questions.append(question)
+        for agent_id in from_agents:
+            agent_questions = questions_df[questions_df['agent_id'] == agent_id]
+            for idx in agent_questions.index[:questions_per_agent]:
+                question = cls.from_id(idx)
+                questions.append(question)
         return questions
 
     def load_embedding(self):

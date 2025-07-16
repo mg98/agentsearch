@@ -1,105 +1,113 @@
-import shutil
-import shutil
-import glob
-from langchain_ollama import OllamaEmbeddings
+import sys
+from tqdm import tqdm
 from langchain_chroma import Chroma
 from langchain_core.documents import Document
-from langchain_text_splitters import HTMLSectionSplitter
-from io import StringIO
-from typing import List
-import pandas as pd
+from agentsearch.dataset.questions import questions_store, questions_df
+from agentsearch.dataset.agents import agents_store, agents_df
+from agentsearch.dataset.agents import Agent
+from agentsearch.utils.globals import db_location, embeddings
 
-db_location = "./chroma_db"
-embeddings = OllamaEmbeddings(model="mxbai-embed-large")
+def create_paper_collection(agent: Agent):
+    vector_store = Chroma(
+        collection_name=f'agent_{agent.id}',
+        persist_directory=db_location,
+        embedding_function=embeddings
+    )
+    vector_store.reset_collection()
 
-if __name__ == "__main__":
-    response = input("This will delete chroma_db, are you sure you want to proceed? (y/n): ")
-    if response.lower() != 'y':
-        print("Aborting...")
-        exit()
-    
-    shutil.rmtree(db_location, ignore_errors=True)
+    for paper in agent.papers:
+        chunks = paper.make_chunks()
+        if len(chunks) == 0:
+            print(f"No chunks found for {paper.id}")
+            continue
+        print(f"Adding {len(chunks)} chunks from {paper.id}")
 
-    from agentsearch.dataset.agents import agents_store, agents_df
-    from agentsearch.dataset.questions import questions_store, questions_df
-
-
-    def create_chunks(path_to_html_doc: str) -> List[Document]:
-        headers_to_split_on = [
-            ("h1", "title"),
-            ("h2", "section"),
-            ("h3", "subsection"),
-            ("h4", "subsubsection"),
-            ("h6", "abstract"),
-            ("p", "paragraph"),
-        ]
-        html_splitter = HTMLSectionSplitter(
-            headers_to_split_on=headers_to_split_on,
-            return_each_element=True)
-        
-        with open(path_to_html_doc, 'r') as f:
-            file_content = f.read()
-        file = StringIO(file_content)
-        chunks = html_splitter.split_text_from_file(file)
-        chunks = [chunk for chunk in chunks if chunk.metadata.get('paragraph') and len(chunk.page_content) > 100]
-        return chunks
-
-    def create_paper_collection(agent_id: int):
-        vector_store = Chroma(
-            collection_name=f'agent_{agent_id}',
-            persist_directory=db_location,
-            embedding_function=embeddings
-        )
-
-        html_files = glob.glob(f"papers/html/{agent_id}/*.html")
-        for html_file in html_files:
-            print(f"Processing {html_file}")
-            chunks = create_chunks(html_file)
-            if len(chunks) == 0:
-                print(f"No chunks found for {html_file}")
-                continue
-            print(f"Adding {len(chunks)} chunks from {html_file}")
+        # Process chunks in batches
+        BATCH_SIZE = 32
+        for i in range(0, len(chunks), BATCH_SIZE):
+            batch_chunks = chunks[i:i+BATCH_SIZE]
+            batch_ids = [f"{paper.id}_{j}" for j in range(i, i + len(batch_chunks))]
             vector_store.add_documents(
-                documents=chunks,
-                ids=[f"{html_file}_{i}" for i in range(len(chunks))]
+                documents=batch_chunks,
+                ids=batch_ids
             )
 
-    def create_question_collection():
-        documents = [Document(
-            page_content=row['question'],
-            metadata={
-                "agent_id": row['agent_id']
-            }) for _, row in questions_df.iterrows()]
+def create_question_collection():
+    documents = [Document(
+        page_content=row['question'],
+        metadata={
+            "agent_id": row['agent_id']
+        }) for _, row in questions_df.iterrows()]
+    
+    questions_store.add_documents(
+        documents=documents,
+        ids=[str(i) for i in questions_df.index.tolist()]
+    )
+
+def create_agent_collection():
+    agents = Agent.all(shallow=True)
+
+    documents = [Document(
+        page_content=", ".join(agent.research_fields),
+        metadata={
+            "name": agent.name,
+            "scholar_url": agent.scholar_url
+        }) for agent in agents]
+    
+    agents_store.add_documents(
+        documents=documents,
+        ids=[str(agent.id) for agent in agents]
+    )
+
+if __name__ == "__main__":
+    if len(sys.argv) != 2 or sys.argv[1] not in ['questions', 'agents', 'papers']:
+        print("Usage: python -m scripts.embed [questions|agents|papers]")
+        sys.exit(1)
         
-        questions_store.add_documents(
-            documents=documents,
-            ids=[str(i) for i in questions_df.index.tolist()]
-        )
+    mode = sys.argv[1]
+    
+    # Create requested collection
+    if mode == 'questions':
+        questions_store.reset_collection()
+        print("Creating question collection...")
+        create_question_collection()
+    elif mode == 'agents':
+        agents_store.reset_collection()
+        print("Creating agents collection...")
+        create_agent_collection()
+    elif mode == 'papers':  # papers mode
+        print("Creating paper collections...")
+        for agent in tqdm(Agent.all(shallow=True), desc="Agents"):
+            agent.load_papers()
+            create_paper_collection(agent)
+    else:
+        print("Invalid mode")
+        sys.exit(1)
+    
+    print(f"Successfully created {mode} collection")
 
-    def create_agent_collection():
-        documents = [Document(
-            page_content=", ".join(row['research_fields']),
-            metadata={
-                "name": row['name'],
-                "scholar_url": row['scholar_url']
-            }) for _, row in agents_df.iterrows()]
-        
-        agents_store.add_documents(
-            documents=documents,
-            ids=[str(i) for i in agents_df.index.tolist()]
-        )
+    
+    # response = input("This will delete chroma_db, are you sure you want to proceed? (y/n): ")
+    # if response.lower() != 'y':
+    #     print("Aborting...")
+    #     exit()
+    
+    # shutil.rmtree(db_location, ignore_errors=True)
 
-    # Create question collection
-    print("Creating question collection...")
-    create_question_collection()
+    # from agentsearch.dataset.agents import agents_store, agents_df
+    # from agentsearch.dataset.questions import questions_store, questions_df
 
-    # Create question collection
-    print("Creating authors collection...")
-    create_agent_collection()
+    # # Create question collection
+    # print("Creating question collection...")
+    # create_question_collection()
 
-    # Create paper collection
-    print("Creating paper collection...")
-    for id, _ in agents_df.iterrows():
-        create_paper_collection(id)
+    # # Create question collection
+    # print("Creating authors collection...")
+    # create_agent_collection()
+
+    # # Create paper collection
+    # print("Creating paper collection...")
+    # for id, _ in agents_df.iterrows():
+    #     create_paper_collection(id)
 
    

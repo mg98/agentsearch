@@ -1,9 +1,6 @@
 from langchain_chroma import Chroma
-from langchain_ollama import OllamaEmbeddings
 from langchain_core.documents import Document
-
-db_location = "./chroma_db"
-embeddings = OllamaEmbeddings(model="mxbai-embed-large")
+from agentsearch.utils.globals import db_location, embeddings
 
 def retrieve(agent_id: int, query: str, k: int = 20) -> list[Document]:
     vector_store = Chroma(

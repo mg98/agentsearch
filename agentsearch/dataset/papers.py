@@ -1,18 +1,20 @@
+import os
 from dataclasses import dataclass
-from agentsearch.arxiv.type import ArxivCategory
+from agentsearch.utils.parse import chunk_pdf
+from langchain_core.documents import Document
 
 @dataclass
-class ArxivPaper:
+class Paper:
     id: str
-    author: str
-    title: str
-    categories: list[ArxivCategory]
+    agent_id: int
 
     @property
-    def primary_category(self) -> ArxivCategory:
-        return self.categories[0]
+    def path(self) -> str:
+        return f'papers/pdf/{self.agent_id}/{self.id}.pdf'
     
-    @property
-    def src_url(self) -> str:
-        return f"https://arxiv.org/src/{self.id}"
-    
+    def exists(self) -> bool:
+        return os.path.exists(self.path)
+
+    def make_chunks(self) -> list[str]:
+        chunks = chunk_pdf(self.path)
+        return [Document(page_content=chunk) for chunk in chunks]

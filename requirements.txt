@@ -6,6 +6,7 @@ langchain
 langchain-ollama
 langchain-openai
 langchain-chroma
+langchain-nomic
 langchain-text-splitters
 lxml
 bs4
@@ -15,3 +16,4 @@ pydantic
 selenium>=4.0.0
 webdriver-manager
 openai
+pymupdf

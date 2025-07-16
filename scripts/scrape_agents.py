@@ -1,3 +1,4 @@
+import pandas as pd
 from selenium import webdriver
 from selenium.webdriver.common.by import By
 from selenium.webdriver.support.ui import WebDriverWait
@@ -7,7 +8,6 @@ from selenium.webdriver.chrome.service import Service
 from selenium.common.exceptions import TimeoutException, NoSuchElementException
 from webdriver_manager.chrome import ChromeDriverManager
 from dataclasses import dataclass, asdict
-import pandas as pd
 
 GOOGLE_SCHOLAR_ORG_ID = "814705155794667179"  # TU Delft
 base_url = f"https://scholar.google.com/citations?view_op=view_org&hl=en&org={GOOGLE_SCHOLAR_ORG_ID}"
@@ -16,6 +16,7 @@ base_url = f"https://scholar.google.com/citations?view_op=view_org&hl=en&org={GO
 class Author:
     name: str
     research_fields: list[str]
+    citation_count: int
     scholar_url: str
 
 def setup_driver():
@@ -67,8 +68,17 @@ def extract_authors_from_page(driver) -> list[Author]:
         interests_container = entry.find_element(By.CLASS_NAME, "gs_ai_int")
         interest_elements = interests_container.find_elements(By.CLASS_NAME, "gs_ai_one_int")
         interests = [interest.text.strip() for interest in interest_elements]
+        if len(interests) == 0:
+            continue
+        
+        # Extract citation count from .gs_ai_cby element
+        citation_element = entry.find_element(By.CLASS_NAME, "gs_ai_cby")
+        citation_text = citation_element.text.strip()  # e.g., "Cited by 93499"
+        # Extract the number from the text
+        if citation_text.startswith("Cited by "):
+            citation_count = int(citation_text.replace("Cited by ", ""))
             
-        authors.append(Author(author_name, interests, author_href))
+        authors.append(Author(author_name, interests, citation_count, author_href))
     
     return authors
 
@@ -117,8 +127,8 @@ if __name__ == "__main__":
         df = pd.DataFrame(authors_dicts)
         # Remove duplicates, keeping entry with most research fields for each name
         df = df.loc[df.groupby('name')['research_fields'].apply(lambda x: x.apply(len).idxmax())]
-        df.to_csv('data/authors.csv', index=True)
-        print(f"Saved {len(all_authors)} authors to data/authors.csv")
+        df.to_csv('data/agents.csv', index=True)
+        print(f"Saved {len(all_authors)} agents")
         print("Last page visited (failed): ", next_url)
 
         driver.quit()

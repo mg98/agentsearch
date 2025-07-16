@@ -1,7 +1,5 @@
 from dataclasses import dataclass
-from agentsearch.arxiv.type import ArxivPaper, ArxivCategory
 from langchain_chroma import Chroma
-from langchain_ollama import OllamaEmbeddings
 from chromadb.api.types import QueryResult
 import pandas as pd
 from ast import literal_eval
@@ -10,12 +8,11 @@ from agentsearch.agent.rag import retrieve
 from agentsearch.agent import qa
 from agentsearch.dataset.questions import questions_store
 import numpy as np
-
-db_location = "./chroma_db"
-embeddings = OllamaEmbeddings(model="mxbai-embed-large")
+from agentsearch.dataset.papers import Paper
+from agentsearch.utils.globals import db_location, embeddings
 
 agents_df = pd.read_csv('data/authors.csv', index_col=0)
-agents_df = agents_df[agents_df.index.astype(str).isin(os.listdir("papers/html"))]
+agents_df = agents_df[agents_df.index.astype(str).isin(os.listdir("papers/pdf"))]
 agents_df['research_fields'] = agents_df['research_fields'].apply(literal_eval)
 agents_df = agents_df[agents_df['research_fields'].apply(len) > 0]
 
@@ -31,28 +28,52 @@ class Agent:
     id: int
     name: str
     research_fields: list[str]
+    citation_count: int
     scholar_url: str
-    papers: list[ArxivPaper]
+    papers: list[Paper]
     embedding: np.ndarray
 
     @classmethod
-    def from_id(cls, id: int) -> 'Agent':
+    def from_id(cls, id: int, shallow: bool = False) -> 'Agent':
         agent = cls(
             id=id,
             name=agents_df.loc[id, 'name'],
             research_fields=agents_df.loc[id, 'research_fields'],
+            citation_count=agents_df.loc[id, 'citation_count'],
             scholar_url=agents_df.loc[id, 'scholar_url'],
             papers=[],
             embedding=None
         )
-        agent.load_papers()
-        agent.load_embedding()
+        if not shallow:
+            agent.load_papers()
+            agent.load_embedding()
         return agent
     
     @classmethod
-    def all(cls) -> list['Agent']:
+    def all(cls, shallow: bool = False) -> list['Agent']:
         agent_ids = agents_df.index.tolist()
-        agents = [cls.from_id(id) for id in agent_ids]
+        agents = [cls.from_id(id, shallow) for id in agent_ids]
+        return agents
+    
+    @classmethod
+    def all_from_cluster(cls, topic: str, size: int) -> list['Agent']:
+        # Get embedding for the topic
+        topic_embedding = embeddings.embed_query(topic)
+        
+        # Query the agents_store for closest agents using the collection directly
+        search_results: QueryResult = agents_store._collection.query(
+            query_embeddings=[topic_embedding],
+            n_results=size,
+            include=['documents', 'distances']
+        )
+        
+        # Convert results to Agent objects
+        agents = []
+        if search_results['ids'] is not None:
+            for agent_id in search_results['ids'][0]:
+                agent = cls.from_id(int(agent_id))
+                agents.append(agent)
+        
         return agents
     
     def load_embedding(self):
@@ -64,27 +85,19 @@ class Agent:
             raise ValueError(f"No embedding found for agent ID {self.id}")
         self.embedding = result['embeddings'][0]
     
-    def load_papers(self) -> list[ArxivPaper]:
-        self.papers = []
-        papers_dir = f'papers/html/{self.name}'
+    def load_papers(self) -> list[Paper]:
+        papers_dir = f'papers/pdf/{self.id}'
         if not os.path.exists(papers_dir):
-            return
-        paper_files = [f for f in os.listdir(papers_dir) if f.endswith('.html')]
-        
-        for paper_file in paper_files:
-            paper_id = paper_file[len('arXiv-'):-len('.html')]
-            try:
-                paper = ArxivPaper.from_id(paper_id)
-                self.papers.append(paper)
-            except ValueError:
-                continue
+            self.papers = []
+        paper_ids = [f[:-len('.pdf')] for f in os.listdir(papers_dir) if f.endswith('.pdf')]
+        self.papers = [Paper(id=paper_id, agent_id=self.id) for paper_id in paper_ids]
 
     def ask(self, question: str) -> str:
         sources = retrieve(self.id, question)
         sources_text = "\n".join([f"- {source.page_content}" for source in sources])
         if len(sources) == 0:
             sources_text = "No sources found"
-        print("Number of sources:", len(sources))
+            return "I don't know" # hotfix to make evaluation more efficient
         answer = qa.chain.invoke({"sources": sources_text, "question": question})
         return answer
 
@@ -93,7 +106,7 @@ class AgentMatch:
     agent: Agent
     similarity_score: float
 
-def match_by_qid(qid: int, top_k: int = 1, blacklist: list[int] = []) -> list[AgentMatch]:
+def match_by_qid(qid: int, top_k: int = 1, whitelist: list[int] = []) -> list[AgentMatch]:
     """
     Match a question to the most similar agents based on Agent Card
     
@@ -116,7 +129,7 @@ def match_by_qid(qid: int, top_k: int = 1, blacklist: list[int] = []) -> list[Ag
         query_embeddings=[question_embedding],
         n_results=top_k,
         include=['documents', 'distances'],
-        ids=[str(id) for id in agents_df.index.tolist() if id not in blacklist]
+        ids=[str(id) for id in whitelist]
     )
     matches: list[AgentMatch] = []
     if search_results['distances'] is not None:

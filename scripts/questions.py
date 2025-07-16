@@ -4,7 +4,6 @@ import os
 from datetime import datetime
 from openai import OpenAI
 from pydantic import BaseModel, Field
-from agentsearch.arxiv.db import load_categories
 import pandas as pd
 from agentsearch.dataset.agents import Agent
 from typing import List
@@ -107,7 +106,7 @@ def monitor_batch_job(batch_id):
     
     status = "validating"
     while status not in ("completed", "failed", "cancelled", "expired"):
-        time.sleep(60)  # Wait 60 seconds between checks
+        time.sleep(30)  # Wait 60 seconds between checks
         
         batch_response = client.batches.retrieve(batch_id)
         status = batch_response.status
