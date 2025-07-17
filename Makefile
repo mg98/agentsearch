@@ -6,11 +6,6 @@ clean:
 install:
 	pip install -r requirements.txt
 	docker build -t engrafo engrafo/.
-	ollama pull mxbai-embed-large
+	ollama pull nomic-embed-text
 	ollama pull llama3.1:8b
-
-dataset:
-	python -m agentsearch.dataset.download
-	python -m agentsearch.dataset.convert
-	python -m agentsearch.dataset.embed
 

@@ -27,34 +27,55 @@ To execute the entire pipeline with a single command, use:
 make dataset
 ```
 
-### 1. Download LaTeX Projects
+### 1. Scrape Agents
 
-This will download the LaTeX source code (as `.tar.gz`) from arXiv.org for all available papers for a specified set of authors. Files are exported to `papers/src/{authorId}/{arxivPaperId}.tar.gz`.
-
-```
-python -m agentsearch.dataset.download
-```
-
-### 2. Convert LaTeX to HTML
-
-This will convert all papers in `papers/src` to single HTML files, exported to `papers/html/{authorId}/{arxivPaperId}.html`. The conversion is run in a Docker container and parallelized over all available CPU cores.
+This will scrape all Google Scholar profiles with TU Delft affiliation, including names and self-proclaimed research fields (= agent card).
 
 ```
-python -m agentsearch.dataset.convert
+python -m scripts.scrape_agents
 ```
 
-### 3. Chunking and Embedding
+<img src="assets/google-scholar.png" height=300>
 
-For all available papers in `papers/html`, the papers are chunked into content segments identified by paragraphs. Every paragraph is embedded and stored in `chroma_db`.
+### 2. Download Papers
 
-```
-python -m agentsearch.dataset.embed
-```
-
-## Chatbot
-
-A chabot can be started via
+This will match the scraped agents on Semantic Scholar and attempt to download all linked papers (PDF) with open access.
 
 ```
-python -m agentsearch.agent.qa
+python -m scripts.download
 ```
+
+### 3. Generate Questions
+
+This will generate five questions for each agent based on their agent card and store them in `data/questions.csv`.
+
+```
+python -m scripts.questions
+```
+
+### 4. Embedding
+
+In order to save computation time in the experiments, we precompute embeddings for agent cards, questions, and papers.
+The latter will be split into chunks on the basis of paragraphs.
+
+```
+python -m scripts.embed agents
+python -m scripts.embed questions
+python -m scripts.embed papers
+```
+
+## Experiments
+
+Details of this to be determined. Work in progress! 👷🏻 Currently, we do...
+
+- limit the network to a semantically-close-clustered network of 16 nodes
+- source and shuffle questions from all of these nodes
+- let each node ask a sample question to the top-3 agents matched by agent card
+- evaluate answer on a scale 0-1, make edge
+- for test queries: match top agents based on edge prediction
+
+```
+python -m agentsearch.graph.graph
+```
+
+<img height="336" alt="Graph" src="assets/graph.png" />
