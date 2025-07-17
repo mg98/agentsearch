@@ -1,6 +1,7 @@
 **/.DS_Store
 **/__pycache__/
 .deepeval/
+.pytest_cache/
 chroma_db/
 
 papers/

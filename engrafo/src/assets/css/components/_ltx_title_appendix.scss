@@ -1,9 +1,0 @@
-@import "./ltx_title_section";
-
-.ltx_title_appendix {
-  @extend .ltx_title_section;
-
-  .ltx_tag_appendix {
-    margin-right: 2em;
-  }
-}
