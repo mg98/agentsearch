@@ -20,7 +20,7 @@ class QuestionList(BaseModel):
 question_template = """
 You are a scientist at Delft University of Technology and an expert in the following domains: {expertise}.
 
-Generate 5 questions that an expert in these domains would be able to answer.
+Generate 10 questions that an expert in these domains would be able to answer.
 Do not enumerate the questions, just list them.
 """
 

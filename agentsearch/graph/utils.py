@@ -1,45 +1,107 @@
-import matplotlib.cm as cm
-import matplotlib.pyplot as plt
-import networkx as nx
 import numpy as np
+import networkx as nx
+from pyvis.network import Network
 from agentsearch.graph.types import GraphData
 
-def visualize_graph(data: GraphData, title="Graph Visualization"):
-    """Visualizes the graph with edge colors based on trust score."""
-    g = nx.DiGraph() # Use DiGraph for directed edges
-
-    # Add nodes
-    g.add_nodes_from(range(data.x.shape[0]))
-
-    # Add edges and trust scores as attributes
+def visualize_graph(data: GraphData, title="Graph Visualization", hide_isolated_nodes=True, output_file="graph.html"):
+    """Visualizes the graph with edge colors based on trust score using pyvis."""
+    
+    # Create a pyvis network with more stable settings
+    net = Network(height="800px", width="100%", bgcolor="#ffffff", font_color="black", directed=True)
+    net.repulsion(node_distance=200, central_gravity=0.1, spring_length=200, spring_strength=0.05, damping=0.95)
+    
+    # Disable physics for a static layout
+    net.set_options("""
+    var options = {
+      "physics": {
+        "enabled": false
+      },
+      "layout": {
+        "hierarchical": {
+          "enabled": false
+        }
+      },
+      "interaction": {
+        "dragNodes": true,
+        "dragView": true,
+        "zoomView": true
+      }
+    }
+    """)
+    
+    # Get data as numpy arrays
+    num_nodes = data.x.shape[0]
     edges = data.edge_index.t().cpu().numpy()
-    trust_scores = data.edge_trust_score.cpu().numpy().flatten()
-    g.add_edges_from(edges)
-
-    # Use trust scores for edge colors, ensuring it's a flattened float array and handling potential NaNs
-    edge_colors = trust_scores.astype(float).flatten()
-    # Replace any non-finite values (like NaNs) with a default value (e.g., 0.0)
-    edge_colors[np.isnan(edge_colors)] = 0.0
-
-    # Create a ScalarMappable to map trust scores to colors
-    cmap = cm.viridis
-    sm = plt.cm.ScalarMappable(cmap=cmap, norm=plt.Normalize(vmin=0, vmax=1))
-    sm.set_array([]) # Or pass the actual data: sm.set_array(edge_colors)
-
-    # Map the edge_colors data to RGBA values using the ScalarMappable
-    rgba_colors = sm.to_rgba(edge_colors)
-
-    # Explicitly create figure and axes
-    fig, ax = plt.subplots(figsize=(12, 12))
-
-    pos = nx.spring_layout(g, seed=42) # for reproducible layout
-    nx.draw_networkx_nodes(g, pos, node_color='lightblue', node_size=200, ax=ax)
-    edges = nx.draw_networkx_edges(g, pos, edge_color=rgba_colors, # Use the mapped RGBA colors
-                                   arrows=True, arrowstyle='->', arrowsize=10, width=1.5, ax=ax)
-
-    # Add a colorbar, explicitly linked to the axes
-    cbar = plt.colorbar(sm, shrink=0.8, ax=ax) # Use the ScalarMappable for the colorbar and link to axes
-    cbar.set_label('Edge Trust Score', rotation=270, labelpad=15)
-
-    ax.set_title(title, fontsize=16)
-    plt.show()
+    trust_scores = data.edge_attributes[:, -1].cpu().numpy().flatten()
+    
+    # Create a NetworkX graph to compute layout
+    G = nx.DiGraph()
+    G.add_nodes_from(range(num_nodes))
+    G.add_edges_from(edges)
+    
+    # Remove isolated nodes if requested
+    if hide_isolated_nodes:
+        nodes_to_remove = [node for node in G.nodes() if G.degree(node) == 0]
+        G.remove_nodes_from(nodes_to_remove)
+    
+    # Compute layout positions using spring layout with better spacing
+    try:
+        # Use larger k value for more spacing between nodes
+        pos = nx.spring_layout(G, k=3/np.sqrt(len(G.nodes())), iterations=100, seed=42)
+    except:
+        # Fallback to circular layout if spring layout fails
+        pos = nx.circular_layout(G)
+    
+    # Scale positions to spread across much larger area
+    scale_factor = 800  # Much larger scaling
+    center_x, center_y = 600, 400  # Center position
+    for node in pos:
+        pos[node] = (pos[node][0] * scale_factor + center_x, 
+                    pos[node][1] * scale_factor + center_y)
+    
+    # Add nodes with computed positions
+    for node_id in G.nodes():
+        x, y = pos[node_id]
+        net.add_node(int(node_id), 
+                    label=f"Node {node_id}", 
+                    title=f"Node {node_id}",
+                    color="#97c2fc",
+                    size=20,
+                    x=x, y=y)
+    
+    # Add edges with colors based on trust scores
+    for i, edge in enumerate(edges):
+        source, target = int(edge[0]), int(edge[1])
+        trust_score = float(trust_scores[i]) if i < len(trust_scores) else 0.0
+        
+        # Skip if either node is not in our graph (e.g., was removed due to isolation)
+        if source not in G.nodes() or target not in G.nodes():
+            continue
+            
+        # Handle NaN values
+        if np.isnan(trust_score):
+            trust_score = 0.0
+            
+        # Map trust score to color (0 = red, 1 = green)
+        # Convert trust score to RGB color
+        red = int(255 * (1 - trust_score))
+        green = int(255 * trust_score)
+        blue = 50
+        color = f"rgb({red},{green},{blue})"
+        
+        # Map trust score to edge width (0.5 to 3.0)
+        width = 0.5 + 2.5 * trust_score
+        
+        net.add_edge(source, target, 
+                    color=color,
+                    width=width,
+                    title=f"Trust Score: {trust_score:.3f}",
+                    arrows={"to": {"enabled": True, "scaleFactor": 1.2}})
+    
+    # Set the title
+    net.heading = title
+    
+    # Save and return the network
+    net.save_graph(output_file)
+    print(f"Graph visualization saved to {output_file}")
+    return net

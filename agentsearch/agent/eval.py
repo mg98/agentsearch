@@ -8,28 +8,30 @@ from deepeval.metrics.dag import (
     TaskNode,
 )
 
-# First, extract objective measures
-extract_stats_node = TaskNode(
-    instructions="Count the number of sentences, paragraphs, examples, and key concepts mentioned in the answer. Output in format: 'Sentences: X, Paragraphs: Y, Examples: Z, Key concepts: V'",
-    evaluation_params=[LLMTestCaseParams.ACTUAL_OUTPUT],
-    output_label="Answer Statistics",
-    children=[]
-)
-
 # More specific criteria based on measurable elements
 detail_assessment_node = NonBinaryJudgementNode(
-    criteria="Based on the Answer Statistics, classify the answer detail level.",
+    criteria=(
+        "Classify the answer detail level based on the extracted statistics."
+    ),
     children=[
-        VerdictNode(verdict="Simple: One paragraph, less than 5 sentences", score=6),
-        VerdictNode(verdict="Nuanced: Multiple paragraphs and key concepts", score=8),
-        VerdictNode(verdict="Extensive: Multiple examples, multiple paragraphs, at least 5 key concepts", score=10),
+        # VerdictNode(verdict="No facts, or claim that they do not know the answer", score=0),
+        VerdictNode(verdict="Some facts but less than three examples", score=5),
+        VerdictNode(verdict="Some facts and at least three examples", score=10),
     ],
 )
 
-# Connect extract_stats_node to detail_assessment_node
-extract_stats_node.children = [detail_assessment_node]
+extract_stats_node = TaskNode(
+    instructions="""
+    Count the number of unique factual statements that are relevant to the question. 
+    Then, count the number of unique examples. 
+    Examples include scenarios, solutions, algorithms, methods, challenges, benefits, and alike. 
+    Output in format: 'Facts: X, Examples: Y'
+    """,
+    evaluation_params=[LLMTestCaseParams.ACTUAL_OUTPUT],
+    output_label="Statistics",
+    children=[detail_assessment_node]
+)
 
-# Check if any information was provided
 info_provided_node = BinaryJudgementNode(
     evaluation_params=[LLMTestCaseParams.ACTUAL_OUTPUT],
     criteria="Does the answer provide actual information about the topic (rather than saying they don't know or can't answer)?",
@@ -41,11 +43,11 @@ info_provided_node = BinaryJudgementNode(
 
 dag = DeepAcyclicGraph(root_nodes=[info_provided_node])
 
-def grade_answer(question: str, answer: str) -> float:
+def grade_answer(question: str, answer: str, include_reason: bool = False) -> float:
     test_case = LLMTestCase(
         input=question,
         actual_output=answer
     )
-    answer_quality = DAGMetric(name="Answer Quality", dag=dag, model="gpt-4o")
+    answer_quality = DAGMetric(name="Answer Quality", dag=dag, include_reason=include_reason, model="gpt-4.1-mini")
     answer_quality.measure(test_case)
     return answer_quality.score, answer_quality.reason

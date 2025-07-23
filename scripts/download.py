@@ -1,7 +1,7 @@
 import os
 import shutil
 import pandas as pd
-import json
+import time
 import requests
 from bs4 import BeautifulSoup
 from concurrent.futures import ThreadPoolExecutor
@@ -13,6 +13,7 @@ from rich.console import Console
 from rich.text import Text
 from rich.style import Style
 from agentsearch.dataset.papers import Paper
+from agentsearch.apis import s2
 
 headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"}
 
@@ -56,59 +57,8 @@ class SegmentedBarColumn(ProgressColumn):
         
         return bar
 
-
-def match_s2_profile(agent_row: pd.Series) -> str:
-    # Query Semantic Scholar API to find matching authors
-    url = f"https://api.semanticscholar.org/graph/v1/author/search?query={agent_row['name']}&fields=citationCount"
-    response = requests.get(url)
-    assert response.status_code == 200
-    data = response.json()
-    if 'next' in data:
-        raise Exception("Semantic Scholar API returned more than 100 results")
-    
-    # Find the candidate with citation count closest to agent's citation count
-    candidates = data['data']
-    closest_match = None
-    min_diff = float('inf')
-    
-    for candidate in candidates:
-        candidate_citations = candidate.get('citationCount', 0)
-        if candidate_citations is None:
-            continue
-            
-        diff = abs(candidate_citations - agent_row['citation_count'])
-        if diff < min_diff:
-            min_diff = diff
-            closest_match = candidate
-    
-    assert closest_match is not None
-    return closest_match['authorId']
-
-# See: https://api.semanticscholar.org/api-docs/#tag/Paper-Data/operation/get_graph_get_paper
-ExternalPaperIDs = list[dict[str, str]]
-S2Paper = tuple[str, ExternalPaperIDs]
-
-def get_papers_from_s2_profile(s2_profile_id: str) -> list[S2Paper]:
-    """
-    Retrieves all papers from a Semantic Scholar profile. 
-    Returns a list of S2 paper IDs and their external IDs, e.g., DOI or ArXiv (keys not guaranteed).
-    """
-    results = []
-    data = {"next": 0}
-
-    while 'next' in data:
-        url = f"https://api.semanticscholar.org/graph/v1/author/{s2_profile_id}/papers?fields=externalIds&offset={data['next']}"
-        response = requests.get(url)
-        assert response.status_code == 200
-        data = response.json()
-        results.extend([(result['paperId'], result['externalIds']) for result in data['data']])
-
-    return results
-
-
-
 def attempt_pdf_download(url: str, export_path: str) -> bool:
-    resp = requests.get(url, allow_redirects=True, headers=headers)
+    resp = requests.get(url, allow_redirects=True, headers=headers, timeout=30)
                 
     if not resp.status_code == 200:
         print(f"failed to download: url={url} status={resp.status_code}")
@@ -143,7 +93,7 @@ def scrape_pdf_url(html: str, current_url: str) -> str | None:
     
     return url
 
-def download_paper(agent_id: str, s2_paper: S2Paper) -> bool:
+def download_paper(agent_id: str, s2_paper: s2.Paper) -> bool:
     """
     Downloads a paper through external IDs.
     Returns True if successful, False otherwise.
@@ -155,7 +105,7 @@ def download_paper(agent_id: str, s2_paper: S2Paper) -> bool:
         if 'ArXiv' in external_ids:
             arxiv_id = external_ids['ArXiv']
             url = f"https://arxiv.org/pdf/{arxiv_id}"
-            response = requests.get(url)
+            response = requests.get(url, timeout=30)
             if response.status_code != 200:
                 raise Exception(f"ArXiv download failed with status {response.status_code} for {arxiv_id}")
             if response.headers['Content-Type'] == 'application/pdf':
@@ -169,14 +119,14 @@ def download_paper(agent_id: str, s2_paper: S2Paper) -> bool:
             doi = external_ids['DOI']
             
             unpaywall_url = f"https://api.unpaywall.org/v2/{doi}?email=m.gregoriadis@tudelft.nl"
-            response = requests.get(unpaywall_url)
+            response = requests.get(unpaywall_url, timeout=30)
             if response.status_code != 200:
                 print(f"Unpaywall download failed with status {response.status_code}")
                 return False
             data = response.json()
 
             if not data.get('is_oa'):
-                resp = requests.get(data['doi_url'], allow_redirects=True, headers=headers)
+                resp = requests.get(data['doi_url'], allow_redirects=True, headers=headers, timeout=30)
                 
                 if not resp.status_code == 200:
                     print(f"failed to download: url={resp.url} status={resp.status_code}")
@@ -197,7 +147,7 @@ def download_paper(agent_id: str, s2_paper: S2Paper) -> bool:
 
             for loc in data['oa_locations']:
                 url = loc['url_for_pdf'] if loc.get('url_for_pdf') else loc['url']
-                resp = requests.get(url, allow_redirects=True, headers=headers)
+                resp = requests.get(url, allow_redirects=True, headers=headers, timeout=30)
                 
                 if not resp.status_code == 200:
                     print(f"failed to download: url={resp.url} status={resp.status_code}")
@@ -250,54 +200,61 @@ if __name__ == "__main__":
         total_processed = 0
 
         for agent_id, agent_row in agents_df.iterrows():
+
+            # Wait 1 second between agents to avoid rate limiting
+            time.sleep(1)
+            
+            # Get S2 profile and papers for this agent
             try:
-                # Get S2 profile and papers for this agent
-                s2_profile_id = match_s2_profile(agent_row)
-                s2_papers = get_papers_from_s2_profile(s2_profile_id)
-                
-                if not s2_papers:
-                    print(f"No papers found for agent {agent_row['name']}")
-                    continue
-                    
-                print(f"Found {len(s2_papers)} papers for {agent_row['name']}")
-
-                agent_paper_dir = f'papers/pdf/{agent_id}'
-                os.makedirs(agent_paper_dir, exist_ok=True)
-
-                # Process papers sequentially
-                for s2_paper in s2_papers:
-                    paper = Paper(agent_id, s2_paper)
-                    if paper.exists():
-                        print(f"Paper {paper.id} already exists")
-                        continue
-
-                    try:
-                        if download_paper(agent_id, s2_paper):
-                            successes += 1
-                            print("✅", s2_paper)
-                        else:
-                            failures += 1
-                            print("❌", s2_paper)
-                    except Exception as e:
-                        print(f"Error processing paper: {e}")
-                        failures += 1
-                    finally:
-                        total_processed += 1
-                        progress.update(
-                            download_task,
-                            completed=total_processed,
-                            successes=successes,
-                            failures=failures
-                        )
-
-                # If no papers downloaded, remove the agent directory
-                if not os.listdir(agent_paper_dir):
-                    shutil.rmtree(agent_paper_dir)
-                
+                s2_profile_id = s2.match_profile(agent_row)
+                s2_papers = s2.get_papers(s2_profile_id)
             except Exception as e:
                 print(f"Error processing agent {agent_row['name']}: {e}")
                 continue
             
+            if not s2_papers:
+                print(f"No papers found for agent {agent_row['name']}")
+                continue
+                
+            print(f"Found {len(s2_papers)} papers for {agent_row['name']}")
+
+            agent_paper_dir = f'papers/pdf/{agent_id}'
+            try:
+                os.makedirs(agent_paper_dir)
+            except FileExistsError:
+                print(f"Agent {agent_id} already has papers")
+                continue
+
+            # Process papers sequentially
+            for s2_paper in s2_papers:
+                paper = Paper(s2_paper[0], agent_id)
+                if paper.exists():
+                    print(f"Paper {paper.id} already exists")
+                    continue
+
+                try:
+                    if download_paper(agent_id, s2_paper):
+                        successes += 1
+                        print("✅", s2_paper)
+                    else:
+                        failures += 1
+                        print("❌", s2_paper)
+                except Exception as e:
+                    print(f"Error processing paper: {e}")
+                    failures += 1
+                finally:
+                    total_processed += 1
+                    progress.update(
+                        download_task,
+                        completed=total_processed,
+                        successes=successes,
+                        failures=failures
+                    )
+            # If no papers downloaded, remove the agent directory
+            if not os.listdir(agent_paper_dir):
+                shutil.rmtree(agent_paper_dir)
+                print(f"Removed empty agent directory {agent_paper_dir}")
+        
         # Print final summary
         console = Console()
         console.print(f"\n{'='*60}")

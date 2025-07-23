@@ -21,41 +21,7 @@ maartens_answer = """
 I don't know. The provided sources don't contain information on solving trust in a peer-to-peer network. They discuss concepts related to trust bias in recommender systems, specifically how to correct for it using affine estimators. However, they don't provide guidance on building or maintaining trust in peer-to-peer networks.
 """
 
-from deepeval.test_case import LLMTestCaseParams
-from deepeval.metrics.dag import (
-    DeepAcyclicGraph,
-    TaskNode,
-    BinaryJudgementNode,
-    NonBinaryJudgementNode,
-    VerdictNode,
-)
-
-# Level 3 — Specificity & Detail
-detail_node = NonBinaryJudgementNode(
-    criteria="How much technical detail does the answer provide?",
-    children=[
-        VerdictNode(verdict="Extensive detail", score=4),
-        VerdictNode(verdict="Some detail", score=3),
-        VerdictNode(verdict="Little detail", score=2),
-        VerdictNode(verdict="No detail", score=1),
-    ],
-)
-
-# Level 1 — Relevance
-relevance_node = BinaryJudgementNode(
-    evaluation_params=[LLMTestCaseParams.ACTUAL_OUTPUT],
-    criteria="Did the author provide an answer?",
-    children=[
-        VerdictNode(verdict=False, score=0),
-        VerdictNode(verdict=True, score=10),
-    ],
-)
-
-# create the DAG
-dag = DeepAcyclicGraph(root_nodes=[relevance_node])
-
-from deepeval.metrics import DAGMetric
-
 for answer in [johans_answer, rowdys_answer, maartens_answer]:
-    grade = grade_answer("how to solve trust in a peer to peer network?", answer)
+    grade, reason = grade_answer("how to solve trust in a peer to peer network?", answer)
     print(grade)
+    print(reason)

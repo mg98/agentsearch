@@ -1,9 +1,16 @@
 from langchain_ollama.llms import OllamaLLM
+from langchain_openai import OpenAI
 from langchain_core.prompts import ChatPromptTemplate
 from agentsearch.agent.rag import retrieve
 
 DEBUG = False
-model = OllamaLLM(model="llama3.1:8b", temperature=0)
+# model = OllamaLLM(model="llama3.1:8b", temperature=0)
+
+model = OpenAI(
+    model="gpt-4.1-nano",
+    temperature=0,
+    max_retries=2,
+)
 
 template = """
 You are a scientist answering questions based on provided sources. 

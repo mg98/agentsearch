@@ -17,3 +17,5 @@ selenium>=4.0.0
 webdriver-manager
 openai
 pymupdf
+colorama
+matplotlib
