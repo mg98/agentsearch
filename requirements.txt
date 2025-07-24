@@ -19,3 +19,4 @@ openai
 pymupdf
 colorama
 matplotlib
+networkx

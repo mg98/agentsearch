@@ -12,7 +12,7 @@ from agentsearch.dataset.questions import Question
 from agentsearch.dataset import agents
 from agentsearch.agent import eval
 from agentsearch.graph.types import GraphData, TrustGNN
-from agentsearch.graph.training import train_model, evaluate_and_predict, predict_top_targets
+from agentsearch.graph.training import train_model, evaluate_and_predict, predict_top_targets, predict_trust_scores
 from agentsearch.graph.utils import visualize_graph
 from agentsearch.utils.globals import EMBEDDING_DIM
 import sys
@@ -25,10 +25,10 @@ random.seed(42)
 
 
 if __name__ == '__main__':
-    NUM_AGENTS = 50        # Instead of 16
-    CORE_NUM_QUESTIONS = 20  # Instead of 8
-    NUM_QUESTIONS = 15       # Instead of 8
-    K_MATCHES = 5 
+    NUM_AGENTS = 64        # Instead of 16
+    CORE_NUM_QUESTIONS = 16  # Instead of 8
+    NUM_QUESTIONS = 8       # Instead of 8
+    K_MATCHES = 4
     TOPIC = "artificial intelligence"
 
     all_agents = Agent.all_from_cluster(TOPIC, NUM_AGENTS)
@@ -39,7 +39,7 @@ if __name__ == '__main__':
 
     total_questions_asked = CORE_NUM_QUESTIONS + (NUM_QUESTIONS*K_MATCHES) * NUM_QUESTIONS
 
-    all_questions = Question.all_from_cluster(TOPIC, total_questions_asked)
+    all_questions = Question.all_from_cluster(TOPIC, total_questions_asked + 100)
     random.shuffle(all_questions)
 
     assert len(all_questions) >= total_questions_asked, "Not enough questions" 
@@ -95,7 +95,8 @@ if __name__ == '__main__':
             graph_data: GraphData = pickle.load(f)['data']
 
     # Instantiate the model
-    model = TrustGNN(num_nodes=len(graph_data.agents))
+    node_feature_dim = graph_data.x.size(1)
+    model = TrustGNN(num_nodes=len(graph_data.agents), node_feature_dim=node_feature_dim)
     evaluate_and_predict(model, graph_data, title="Predictions Before Training")
     
     best_val_loss = train_model(model, graph_data)
@@ -103,37 +104,31 @@ if __name__ == '__main__':
     
     evaluate_and_predict(model, graph_data, title="Predictions After Training")
 
-    sys.exit()
-
     # Evaluate another question for comparison
     print(f"{Fore.BLUE}{'-'*100}{Style.RESET_ALL}")
     for i in range(100):
         q = all_questions[total_questions_asked+i]
-        print(f"\n{Fore.GREEN}Predicting top targets for question {Style.BRIGHT}\"{q.question}\"{Style.RESET_ALL}")
+        print(f"\n{Fore.GREEN}Predicting trust scores for top-3 matched agents for question {Style.BRIGHT}\"{q.question}\"{Style.RESET_ALL}")
 
         k = 3
         source_idx = graph_data.agent_id_to_index[core_agent.id]
-        targets = predict_top_targets(model, graph_data, source_idx=source_idx, question=q, top_k=k)
-
-        # Evaluate top-3 predicted agents
-        predicted_grades = []
-        for target in targets[:3]:
-            target_agent = all_agents[target[0]]
-            grade, _ = eval.grade_answer(q.question, target_agent.ask(q.question))
-            predicted_grades.append(grade)
-            print(f"{Fore.YELLOW}PREDICTED {len(predicted_grades)}:\t{target_agent.name} {Fore.GREEN if grade > 0 else Fore.RED}{grade}{Style.RESET_ALL}")
         
-        print(f"{Fore.YELLOW}PREDICTED SUM: {Fore.GREEN if sum(predicted_grades) > 0 else Fore.RED}{sum(predicted_grades):.2f}{Style.RESET_ALL}")
-
-        # Evaluate top-3 matched agents
-        agent_ids = [agent.id for agent in all_agents if agent.id != q.agent_id]
-        matches = agents.match_by_qid(q.id, k, whitelist=[agent.id for agent in graph_data.target_nodes])
-        matched_grades = []
+        # Get top-3 matched agents
+        matches = agents.match_by_qid(q.id, k, whitelist=[agent.id for agent in graph_data.agents])
+        
+        # Get target indices for matched agents
+        target_indices = []
         for match in matches[:3]:
-            grade, _ = eval.grade_answer(q.question, match.agent.ask(q.question))
-            matched_grades.append(grade)
-            print(f"{Fore.YELLOW}MATCHED {len(matched_grades)}:\t{match.agent.name} {Fore.GREEN if grade > 0 else Fore.RED}{grade}{Style.RESET_ALL}")
+            target_idx = graph_data.agent_id_to_index[match.agent.id]
+            target_indices.append(target_idx)
         
-        print(f"{Fore.YELLOW}MATCHED SUM: {Fore.GREEN if sum(matched_grades) > 0 else Fore.RED}{sum(matched_grades):.2f}{Style.RESET_ALL}")
+        # Predict trust scores for matched agents
+        predicted_trust_scores = predict_trust_scores(model, graph_data, source_idx, target_indices, q)
+        
+        # Evaluate and compare actual vs predicted for matched agents
+        for idx, match in enumerate(matches[:3]):
+            grade, _ = eval.grade_answer(q.question, match.agent.ask(q.question))
+            predicted_score = predicted_trust_scores[idx] if idx < len(predicted_trust_scores) else 0.0
+            print(f"{Fore.YELLOW}MATCHED {idx+1}:\t{match.agent.name} | Actual: {Fore.GREEN if grade > 0 else Fore.RED}{grade:.2f}{Style.RESET_ALL} | Predicted: {Fore.CYAN}{predicted_score:.4f}{Style.RESET_ALL}")
 
         print(f"{Fore.BLUE}{'-' * 50}{Style.RESET_ALL}")
