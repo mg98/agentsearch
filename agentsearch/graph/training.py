@@ -1,116 +1,163 @@
 import torch
-import random
-from copy import deepcopy
-from agentsearch.dataset.questions import Question
-from agentsearch.graph.types import TrustGNN, GraphData
-import numpy as np
 import torch.nn.functional as F
+from torch.optim.lr_scheduler import ReduceLROnPlateau
+from copy import deepcopy
+import numpy as np
+from agentsearch.graph.types import GraphData, TrustGNN
+from agentsearch.dataset.questions import Question
 
 torch.manual_seed(42)
 
 def train_model(model: TrustGNN, data: GraphData):
-    epochs = 100
-    lr = 0.001  # Higher learning rate for simpler model
-    print(f"Learning rate: {lr}")
-    optimizer = torch.optim.Adam(model.parameters(), lr=lr)
+    """Train the TrustGNN model with enhanced features and diversity regularization"""
+    print(f"Learning rate: {0.01}")
     
-    # Use CrossEntropy for classification task
-    criterion = torch.nn.CrossEntropyLoss()
-
-    train_data, val_data = data.split()
+    # Split data
+    train_data, val_data = data.split(val_ratio=0.2)
     
-    # Convert trust scores to class labels
-    def trust_to_class(trust_scores):
-        """Convert continuous trust scores to class labels"""
-        classes = torch.zeros_like(trust_scores, dtype=torch.long)
-        classes[trust_scores == 0.0] = 0  # Low trust
-        classes[trust_scores == 0.5] = 1  # Medium trust  
-        classes[trust_scores == 1.0] = 2  # High trust
-        return classes
-    
-    train_labels = trust_to_class(train_data.edge_attributes[:, -1])
-    val_labels = trust_to_class(val_data.edge_attributes[:, -1])
-    
-    # Analyze data distribution
     print(f"Training on {train_data.edge_index.size(1)} edges, validating on {val_data.edge_index.size(1)} edges")
     
-    # Check class distribution
-    train_counts = torch.bincount(train_labels, minlength=3)
-    val_counts = torch.bincount(val_labels, minlength=3)
+    # Print statistics
+    train_trust_stats = train_data.edge_trust_score.squeeze()
+    val_trust_stats = val_data.edge_trust_score.squeeze()
+    print(f"Train trust score stats - Min: {train_trust_stats.min():.3f}, Max: {train_trust_stats.max():.3f}, Mean: {train_trust_stats.mean():.3f}, Std: {train_trust_stats.std():.3f}")
+    print(f"Val trust score stats - Min: {val_trust_stats.min():.3f}, Max: {val_trust_stats.max():.3f}, Mean: {val_trust_stats.mean():.3f}, Std: {val_trust_stats.std():.3f}")
     
-    print(f"Train class distribution - Low: {train_counts[0]}, Medium: {train_counts[1]}, High: {train_counts[2]}")
-    print(f"Val class distribution - Low: {val_counts[0]}, Medium: {val_counts[1]}, High: {val_counts[2]}")
+    # Initialize optimizer with weight decay for regularization
+    optimizer = torch.optim.AdamW(model.parameters(), lr=0.01, weight_decay=1e-4)
+    scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, 'min', patience=5, factor=0.7)
+    
+    criterion = torch.nn.MSELoss()
+    
+    best_val_loss = float('inf')
+    best_val_mae = float('inf')
+    patience_counter = 0
+    max_patience = 10
     
     print("--- Starting Training ---")
-    best_val_loss = float('inf')
-    
-    for epoch in range(epochs):
-        # Training
+    for epoch in range(1, 101):
         model.train()
-        optimizer.zero_grad()
         
-        # Get logits for CrossEntropy loss
-        train_logits = model.forward_logits(train_data)
-        train_loss = criterion(train_logits, train_labels)
-        train_loss.backward()
+        # Forward pass
+        pred_scores = model(train_data)
+        
+        # Main MSE loss
+        mse_loss = criterion(pred_scores, train_data.edge_trust_score.squeeze())
+        
+        # Add diversity regularization to prevent agent bias
+        target_agents = train_data.prediction_target_ids
+        unique_agents, agent_counts = torch.unique(target_agents, return_counts=True)
+        
+        # Compute agent-specific average predictions
+        agent_avg_preds = torch.zeros(len(unique_agents))
+        for i, agent_id in enumerate(unique_agents):
+            agent_mask = target_agents == agent_id
+            agent_avg_preds[i] = pred_scores[agent_mask].mean()
+        
+        # Diversity loss - penalize if agent predictions are too similar
+        if len(agent_avg_preds) > 1:
+            diversity_loss = -torch.var(agent_avg_preds) * 0.01  # Small weight
+        else:
+            diversity_loss = 0.0
+        
+        # Total loss
+        total_loss = mse_loss + diversity_loss
+        
+        # Backward pass
+        optimizer.zero_grad()
+        total_loss.backward()
         optimizer.step()
         
         # Validation
         model.eval()
         with torch.no_grad():
-            val_logits = model.forward_logits(val_data)
-            val_loss = criterion(val_logits, val_labels)
+            val_pred_scores = model(val_data)
+            val_loss = criterion(val_pred_scores, val_data.edge_trust_score.squeeze())
             
-            if val_loss < best_val_loss:
-                best_val_loss = val_loss
+            # Compute MAE for both train and val
+            train_mae = torch.mean(torch.abs(pred_scores - train_data.edge_trust_score.squeeze())).item()
+            val_mae = torch.mean(torch.abs(val_pred_scores - val_data.edge_trust_score.squeeze())).item()
         
-        if (epoch + 1) % 10 == 0:
-            # Calculate accuracy
-            train_pred = torch.argmax(train_logits, dim=1)
-            val_pred = torch.argmax(val_logits, dim=1)
-            train_acc = (train_pred == train_labels).float().mean()
-            val_acc = (val_pred == val_labels).float().mean()
-            
-            print(f'Epoch: {epoch+1:03d}, Train Loss: {train_loss.item():.6f}, Val Loss: {val_loss.item():.6f}, Train Acc: {train_acc:.3f}, Val Acc: {val_acc:.3f}')
-            
-    print(f"--- Training Finished - Best Val Loss: {best_val_loss:.6f} ---")
+        # Learning rate scheduling
+        scheduler.step(val_loss)
+        
+        # Track best model
+        if val_mae < best_val_mae:
+            best_val_loss = val_loss.item()
+            best_val_mae = val_mae
+            patience_counter = 0
+        else:
+            patience_counter += 1
+        
+        # Print progress every 3 epochs
+        if epoch % 3 == 0:
+            pred_min, pred_max = pred_scores.min().item(), pred_scores.max().item()
+            pred_std = pred_scores.std().item()
+            print(f"Epoch: {epoch:03d}, Train Loss: {total_loss.item():.6f}, Val Loss: {val_loss.item():.6f}, "
+                  f"Train MAE: {train_mae:.4f}, Val MAE: {val_mae:.4f}, "
+                  f"Pred Range: [{pred_min:.3f}, {pred_max:.3f}], Pred Std: {pred_std:.3f}")
+        
+        # Early stopping
+        if patience_counter >= max_patience:
+            print(f"Early stopping at epoch {epoch}. Best val MAE: {best_val_mae:.4f}")
+            break
+    
+    print(f"--- Training Finished - Best Val Loss: {best_val_loss:.6f}, Best Val MAE: {best_val_mae:.4f} ---")
     return best_val_loss
 
-def evaluate_and_predict(model: TrustGNN, data: GraphData, title="Model Predictions"):
-    _, data = data.split()
-    print(f"\n--- {title} ---")
+
+def evaluate_and_predict(model: TrustGNN, data: GraphData, title="Evaluation"):
+    """
+    Evaluate model performance and show sample predictions
+    """
     model.eval()
+    
+    # Run evaluation on validation set
+    _, val_data = data.split(val_ratio=0.2)
+    
     with torch.no_grad():
-        pred_scores = model(data)
-        # Model already outputs probabilities in [0,1] range
+        pred_scores = model(val_data)
+        actual_scores = val_data.edge_trust_score.squeeze()
+        
+        # Calculate metrics
+        mae = torch.mean(torch.abs(pred_scores - actual_scores)).item()
+        mse = torch.mean((pred_scores - actual_scores) ** 2).item()
+        rmse = torch.sqrt(torch.tensor(mse)).item()
+        
+        print(f"\n--- {title} ---")
+        print(f"Evaluation Metrics - MAE: {mae:.4f}, MSE: {mse:.6f}, RMSE: {rmse:.4f}")
+        
+        # Show predictions for first 20 edges
+        print("Showing predictions for the first 20 edges:")
+        print("-" * 60)
+        print(f"{'Edge (S->T)':<15} | {'Actual (norm)':<15} | {'Predicted (norm)':<16} | {'Error':<9}")
+        print("-" * 60)
+        
+        for i in range(min(20, len(pred_scores))):
+            source_idx = val_data.prediction_source_ids[i].item()
+            target_idx = val_data.prediction_target_ids[i].item()
+            actual = actual_scores[i].item()
+            predicted = pred_scores[i].item()
+            error = abs(actual - predicted)
+            
+            print(f"Edge {source_idx:3d} -> {target_idx:<3d} | {actual:<15.4f} | {predicted:<16.4f} | {error:<9.4f}")
+        
+        print("-" * 60)
 
-    print("Showing predictions for the first 20 edges:")
-    print("-" * 45)
-    print(f"{'Edge (S->T)':<15} | {'Actual Trust':<15} | {'Predicted Trust':<15}")
-    print("-" * 45)
-
-    for i in range(min(20, data.edge_index.size(1))):
-        source = data.prediction_edge_index[0, i].item()
-        target = data.prediction_edge_index[1, i].item()
-        actual = data.edge_trust_score[i].item()
-        predicted = pred_scores[i].item()
-        print(f"Edge {source:>3} -> {target:<3} | {actual:<15.4f} | {predicted:<15.4f}")
-    print("-" * 45)
 
 def predict_top_targets(model: TrustGNN, data: GraphData, source_idx: int, question: Question, top_k: int = 10) -> list[tuple[int, float]]:
     """
-    Simulate new edges from source_idx to all other nodes and predict which targets
-    will yield the highest trust scores for the given question.
+    Predict the top-k target agents for a given source and question.
     
     Args:
         model: Trained TrustGNN model
         data: Graph data containing node embeddings
-        source_idx: Source node index to create edges from
+        source_idx: Source node index
         question: Question object containing the query context
         top_k: Number of top predictions to return
     
     Returns:
-        List of tuples (target_idx, predicted_score) sorted by score descending
+        List of (target_index, predicted_score) tuples, sorted by score descending
     """
     model.eval()
     
@@ -118,67 +165,18 @@ def predict_top_targets(model: TrustGNN, data: GraphData, source_idx: int, quest
     if not isinstance(question.embedding, np.ndarray):
         question.load_embedding()
     
-    # Get number of nodes in the graph
-    num_nodes = data.x.size(0)
+    # Create prediction data for all possible target agents (excluding source)
+    all_target_indices = [i for i in range(len(data.agents)) if i != source_idx]
     
-    # Create candidate target nodes (all nodes except the source)
-    candidate_targets = [i for i in range(num_nodes) if i != source_idx]
+    # Predict trust scores for all possible targets
+    predicted_scores = predict_trust_scores(model, data, source_idx, all_target_indices, question)
     
-    if len(candidate_targets) == 0:
-        return []
+    # Create list of (target_index, score) tuples and sort by score
+    target_score_pairs = list(zip(all_target_indices, predicted_scores))
+    target_score_pairs.sort(key=lambda x: x[1], reverse=True)
     
-    # Create new edges from source to all candidate targets
-    num_new_edges = len(candidate_targets)
-    new_edge_index = torch.tensor([
-        [source_idx] * num_new_edges,  # Source nodes
-        candidate_targets  # Target nodes
-    ], dtype=torch.long)
-    
-    # Create edge features for new edges
-    # Use a neutral trust score (0.5) as we're just predicting
-    neutral_trust_scores = torch.full((num_new_edges, 1), 0.5, dtype=torch.float32)
-    
-    # Repeat the question embedding for all new edges
-    question_emb_tensor = torch.tensor(question.embedding, dtype=torch.float32).unsqueeze(0)
-    new_edge_query_embeddings = question_emb_tensor.repeat(num_new_edges, 1)
+    return target_score_pairs[:top_k]
 
-    new_edge_attributes = torch.cat([new_edge_query_embeddings, neutral_trust_scores], dim=1)
-    
-    # Combine existing edges with new edges for prediction
-    temp_data = deepcopy(data)
-    temp_data.edge_index = torch.cat([data.edge_index, new_edge_index], dim=1)
-    temp_data.edge_attributes = torch.cat([data.edge_attributes, new_edge_attributes], dim=0)
-    
-    # Update trust_scores if it exists
-    if hasattr(data, 'trust_scores') and isinstance(data.trust_scores, torch.Tensor):
-        new_trust_scores = torch.full((num_new_edges,), 0.5, dtype=torch.float)
-        temp_data.trust_scores = torch.cat([data.trust_scores, new_trust_scores], dim=0)
-
-    # Set up prediction-specific attributes that the model expects
-    temp_data.prediction_edge_index = temp_data.edge_index
-    temp_data.edge_trust_score = temp_data.edge_attributes[:, -1].unsqueeze(1)
-    temp_data.edge_query_embedding = temp_data.edge_attributes[:, :-1]
-    temp_data.prediction_source_ids = temp_data.edge_index[0]
-    temp_data.prediction_target_ids = temp_data.edge_index[1]
-    
-    # Make predictions
-    with torch.no_grad():
-        pred_scores = model(temp_data)
-        # Model already outputs probabilities in [0,1] range
-    
-    # Extract predictions for the new edges only (last num_new_edges predictions)
-    new_edge_predictions = pred_scores[-num_new_edges:]
-    
-    # Create list of (target_idx, predicted_score) tuples
-    predictions = []
-    for i, target_idx in enumerate(candidate_targets):
-        predicted_score = new_edge_predictions[i].item()
-        predictions.append((target_idx, predicted_score))
-    
-    # Sort by predicted score in descending order and return top_k
-    predictions.sort(key=lambda x: x[1], reverse=True)
-    
-    return predictions[:top_k]
 
 def predict_trust_scores(model: TrustGNN, data: GraphData, source_idx: int, target_indices: list[int], question: Question) -> list[float]:
     """
@@ -211,8 +209,9 @@ def predict_trust_scores(model: TrustGNN, data: GraphData, source_idx: int, targ
     ], dtype=torch.long)
     
     # Create edge features for new edges
-    # Use a neutral trust score (0.5) as we're just predicting
-    neutral_trust_scores = torch.full((num_new_edges, 1), 0.5, dtype=torch.float32)
+    # Use the mean trust score from existing data instead of fixed 0.5
+    mean_trust = data.edge_attributes[:, -1].mean().item() if data.edge_attributes.size(0) > 0 else 0.3
+    neutral_trust_scores = torch.full((num_new_edges, 1), mean_trust, dtype=torch.float32)
     
     # Repeat the question embedding for all new edges
     question_emb_tensor = torch.tensor(question.embedding, dtype=torch.float32).unsqueeze(0)
@@ -227,22 +226,19 @@ def predict_trust_scores(model: TrustGNN, data: GraphData, source_idx: int, targ
     
     # Update trust_scores if it exists
     if hasattr(data, 'trust_scores') and isinstance(data.trust_scores, torch.Tensor):
-        new_trust_scores = torch.full((num_new_edges,), 0.5, dtype=torch.float)
+        new_trust_scores = torch.full((num_new_edges,), mean_trust, dtype=torch.float)
         temp_data.trust_scores = torch.cat([data.trust_scores, new_trust_scores], dim=0)
 
     # Set up prediction-specific attributes that the model expects
-    temp_data.prediction_edge_index = temp_data.edge_index
-    temp_data.edge_trust_score = temp_data.edge_attributes[:, -1].unsqueeze(1)
-    temp_data.edge_query_embedding = temp_data.edge_attributes[:, :-1]
-    temp_data.prediction_source_ids = temp_data.edge_index[0]
-    temp_data.prediction_target_ids = temp_data.edge_index[1]
+    temp_data.prediction_edge_index = new_edge_index  # Only predict on NEW edges
+    temp_data.edge_trust_score = new_edge_attributes[:, -1].unsqueeze(1)
+    temp_data.edge_query_embedding = new_edge_attributes[:, :-1]
+    temp_data.prediction_source_ids = new_edge_index[0]
+    temp_data.prediction_target_ids = new_edge_index[1]
     
     # Make predictions
     with torch.no_grad():
         pred_scores = model(temp_data)
     
-    # Extract predictions for the new edges only (last num_new_edges predictions)
-    new_edge_predictions = pred_scores[-num_new_edges:]
-    
     # Return as list of floats
-    return [score.item() for score in new_edge_predictions]
+    return [score.item() for score in pred_scores]

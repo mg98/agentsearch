@@ -92,8 +92,10 @@ class Agent:
         paper_ids = [f[:-len('.pdf')] for f in os.listdir(papers_dir) if f.endswith('.pdf')]
         self.papers = [Paper(id=paper_id, agent_id=self.id) for paper_id in paper_ids]
 
-    def ask(self, question: str) -> str:
+
+    def ask(self, question: str) -> int:
         sources = retrieve(self.id, question)
+        return len(sources)
         sources_text = "\n".join([f"- {source.page_content}" for source in sources])
         if len(sources) == 0:
             sources_text = "No sources found"
