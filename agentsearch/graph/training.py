@@ -35,7 +35,7 @@ def train_model(model: TrustGNN, data: GraphData):
     max_patience = 10
     
     print("--- Starting Training ---")
-    for epoch in range(1, 101):
+    for epoch in range(1, 201):
         model.train()
         
         # Forward pass
