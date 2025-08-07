@@ -65,7 +65,7 @@ def get_papers(s2_profile_id: str) -> list[Paper]:
             headers={'x-api-key': S2_API_KEY},
             timeout=30
         )
-        assert response.status_code == 200, f"failed to get papers for {s2_profile_id}"
+        assert response.status_code == 200, f"failed to get papers for {s2_profile_id}: {response.status_code}"
         data = response.json()
         results.extend([(result['paperId'], result['externalIds']) for result in data['data']])
 

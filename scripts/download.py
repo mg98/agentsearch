@@ -184,7 +184,6 @@ if __name__ == "__main__":
     )
     
     with progress:
-        # Create progress bar without known total
         download_task = progress.add_task(
             "Processing papers", 
             total=None,  # No known total - will grow dynamically
@@ -192,17 +191,13 @@ if __name__ == "__main__":
             failures=0
         )
         
-        # Simple counters for success/failure
         successes = 0
         failures = 0
-
-        # Process agents one by one, discovering papers dynamically
         total_processed = 0
 
         for agent_id, agent_row in agents_df.iterrows():
-
-            # Wait 1 second between agents to avoid rate limiting
-            time.sleep(1)
+            # Sleep to avoid rate limiting
+            time.sleep(60 if total_processed > 0 and total_processed % 100 == 0 else 1)
             
             # Get S2 profile and papers for this agent
             try:

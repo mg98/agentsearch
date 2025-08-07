@@ -35,7 +35,6 @@ if __name__ == '__main__':
 
     for question in tqdm(all_questions[:CORE_NUM_QUESTIONS], desc="Core agent asking questions"):
         print(f"\n{Fore.GREEN}Core agent asking question {Style.BRIGHT}\"{question.question}\"{Style.RESET_ALL}")
-        # Ensure question embedding is loaded
         if question.embedding is None:
             question.load_embedding()
         
@@ -51,10 +50,10 @@ if __name__ == '__main__':
 
     questions_index = CORE_NUM_QUESTIONS
 
+    # Direct target agents = direct neighbors of core agent
     for agent in tqdm(direct_target_agents, desc="Target agents"):
         for question in tqdm(all_questions[questions_index:questions_index+NUM_QUESTIONS], desc="Agent asking questions"):
             print(f"\n{Fore.GREEN}Agent {agent.name} asking question {Style.BRIGHT}\"{question.question}\"{Style.RESET_ALL}")
-            # Ensure question embedding is loaded
             if question.embedding is None:
                 question.load_embedding()
                 
