@@ -45,12 +45,14 @@ def train_epoch(model, data, split_dict, optimizer, criterion, device):
     model.train()
     
     # Forward pass
-    predictions = model(data.x, data.edge_index, data.edge_attr)
+    # we only have access to the edges in the current split
+    train_predictions = model(data.x, data.edge_index[:, split_dict["train_mask"]], data.edge_attr[split_dict["train_mask"]])
+    # predictions = model(data.x, data.edge_index, data.edge_attr)
     
     # Compute loss only on training edges
-    train_predictions = predictions[split_dict['train_mask']]
+    # train_predictions = train_predictions[split_dict['train_mask']]
     train_targets = data.y[split_dict['train_mask']]
-    
+
     loss = criterion(train_predictions, train_targets)
     
     # Backward pass
@@ -70,12 +72,23 @@ def evaluate(model, data, split_dict, criterion, device, split='val'):
     model.eval()
     
     with torch.no_grad():
-        predictions = model(data.x, data.edge_index, data.edge_attr)
+        # a split can use only its and previous splits' edges for inference
+        if split =='val':
+            inclusive_mask = split_dict['train_mask'] + split_dict[f'val_mask']
+            # predictions are of shape [inclusive_mask.sum()]
+            # so we need to have a mask of this shape that tracks which ones are from split_dict['val_mask]
+            output_mask = split_dict['val_mask'][inclusive_mask]
+        elif split == 'test':
+            inclusive_mask = torch.ones_like(data.y).bool()
+            output_mask = split_dict['test_mask']
+        else:
+            raise ValueError(f"Unknown split: {split}")
         
-        # Get predictions and targets for the specified split
-        mask = split_dict[f'{split}_mask']
-        split_predictions = predictions[mask]
-        split_targets = data.y[mask]
+    
+        predictions = model(data.x, data.edge_index[:, inclusive_mask], data.edge_attr[inclusive_mask])
+        
+        split_predictions = predictions[output_mask]
+        split_targets = data.y[split_dict[f'{split}_mask']]
         
         loss = criterion(split_predictions, split_targets)
         
@@ -155,22 +168,7 @@ def train_model(model, data, split_dict, config, device):
     wandb.log({
         **{f'final_test/{k}': v for k, v in test_metrics.items()}
     })
-    
-    # Save model if requested
-    if config['experiment']['save_model']:
-        save_path = config['experiment']['model_save_path']
-        os.makedirs(save_path, exist_ok=True)
-        model_path = os.path.join(save_path, f"{config['experiment']['experiment_name']}_best.pth")
-        torch.save({
-            'model_state_dict': best_model_state,
-            'config': config,
-            'test_metrics': test_metrics
-        }, model_path)
-        logging.info(f"Model saved to {model_path}")
         
-        # Log model artifact to wandb
-        wandb.save(model_path)
-    
     wandb.finish()
     
     return test_metrics
@@ -200,5 +198,6 @@ def setup_model_and_training(graph_data, config):
     logging.info(f"  Node input dim: {node_input_dim}")
     logging.info(f"  Edge input dim: {edge_input_dim}")
     logging.info(f"  Model parameters: {sum(p.numel() for p in model.parameters()):,}")
+    print(f"  Model parameters: {sum(p.numel() for p in model.parameters()):,}")
     
     return model

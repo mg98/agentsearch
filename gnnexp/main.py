@@ -51,10 +51,10 @@ def load_graph_data(data_path):
     
     # Create PyTorch Geometric Data object
     graph_data = Data(
-        x=grph['x'],
-        edge_index=grph['edge_index'],
-        edge_attr=grph['edge_attributes'],
-        y=grph['trust_scores']
+        x=grph['x'], # shape [num_nodes, num_node_features]
+        edge_index=grph['edge_index'], # shape [2, num_edges]
+        edge_attr=grph['edge_attributes'], # shape [num_edges, num_edge_features]
+        y=grph['trust_scores'] # shape [num_edges, 1] for edge regression
     )
     
     return graph_data

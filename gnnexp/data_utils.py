@@ -24,7 +24,7 @@ def logarithmic_normalize(scores, epsilon=1e-8):
     return normalized_scores
 
 
-def create_edge_splits(graph_data, train_ratio=0.7, val_ratio=0.15, test_ratio=0.15, seed=42):
+def create_edge_splits(graph_data, train_ratio, val_ratio, test_ratio, seed):
     """
     Create train/val/test splits for edges and apply logarithmic normalization
     
