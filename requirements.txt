@@ -20,3 +20,4 @@ pymupdf
 colorama
 matplotlib
 networkx
+wandb
