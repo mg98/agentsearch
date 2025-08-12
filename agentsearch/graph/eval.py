@@ -80,7 +80,7 @@ if __name__ == '__main__':
         gnn_predicted_scores.append(gnn_predicted_score)
         gnn_actual_grades.append(gnn_actual_grade)
         
-        print(f"{Fore.YELLOW}GNN TOP-1:\t{gnn_agent.name} | Actual: {Fore.GREEN if gnn_actual_grade > 0.5 else Fore.RED}{gnn_actual_grade:.3f}{Style.RESET_ALL} | Predicted: {Fore.CYAN}{gnn_predicted_score:.3f}{Style.RESET_ALL}")
+        print(f"{Fore.YELLOW}GNN TOP-1:\t{gnn_agent.name} | Actual: {Fore.GREEN if gnn_actual_grade > 0 else Fore.RED}{gnn_actual_grade:.3f}{Style.RESET_ALL} | Predicted: {Fore.CYAN}{gnn_predicted_score:.3f}{Style.RESET_ALL}")
         
         # === MATCHED TOP-1 AGENT ===
         # Get top-1 matched agent (original matching algorithm)
@@ -99,7 +99,7 @@ if __name__ == '__main__':
             matched_predicted_scores.append(matched_predicted_score)
             matched_actual_grades.append(matched_actual_grade)
             
-            print(f"{Fore.YELLOW}MATCHED TOP-1:\t{matched_agent.name} | Actual: {Fore.GREEN if matched_actual_grade > 0.5 else Fore.RED}{matched_actual_grade:.3f}{Style.RESET_ALL} | Predicted: {Fore.CYAN}{matched_predicted_score:.3f}{Style.RESET_ALL}")
+            print(f"{Fore.YELLOW}MATCHED TOP-1:\t{matched_agent.name} | Actual: {Fore.GREEN if matched_actual_grade > 0 else Fore.RED}{matched_actual_grade:.3f}{Style.RESET_ALL} | Predicted: {Fore.CYAN}{matched_predicted_score:.3f}{Style.RESET_ALL}")
         else:
             # Handle case where no matches found
             matched_predicted_scores.append(0.5)

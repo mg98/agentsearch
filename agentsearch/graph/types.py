@@ -19,7 +19,7 @@ class GraphData(Data):
         
         # Initialize edge structures
         self.edge_index = torch.empty((2, 0), dtype=torch.long)
-        self.edge_attributes = torch.empty((0, EMBEDDING_DIM + 1))
+        self.edge_attributes = torch.empty((0, EMBEDDING_DIM))
         
         # Trust scores for each edge (will be populated as edges are added)
         self.trust_scores = torch.empty(0, dtype=torch.float)
@@ -176,8 +176,7 @@ class GraphData(Data):
         self.edge_index = torch.cat([self.edge_index, new_edge], dim=1)
 
         edge_attr = torch.cat([
-            torch.tensor(question_embedding).float().unsqueeze(0),
-            torch.tensor([[grade]], dtype=torch.float)
+            torch.tensor(question_embedding).float().unsqueeze(0)
         ], dim=1)
         self.edge_attributes = torch.cat([self.edge_attributes, edge_attr], dim=0)
         
@@ -324,8 +323,8 @@ class GraphData(Data):
 
         for data in [train_data, val_data]:
             data.prediction_edge_index = data.edge_index
-            data.edge_trust_score = data.edge_attributes[:, -1].unsqueeze(1)
-            data.edge_query_embedding = data.edge_attributes[:, :-1]
+            data.edge_trust_score = data.trust_scores.unsqueeze(1)
+            data.edge_query_embedding = data.edge_attributes
             data.prediction_source_ids = data.edge_index[0]
             data.prediction_target_ids = data.edge_index[1]
         

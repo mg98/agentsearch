@@ -210,29 +210,25 @@ def predict_trust_scores(model: TrustGNN, data: GraphData, source_idx: int, targ
     
     # Create edge features for new edges
     # Use the mean trust score from existing data instead of fixed 0.5
-    mean_trust = data.edge_attributes[:, -1].mean().item() if data.edge_attributes.size(0) > 0 else 0.3
-    neutral_trust_scores = torch.full((num_new_edges, 1), mean_trust, dtype=torch.float32)
+    mean_trust = data.trust_scores.mean().item() if data.trust_scores.size(0) > 0 else 0.3
     
-    # Repeat the question embedding for all new edges
+    # Repeat the question embedding for all new edges (just embeddings, no trust scores)
     question_emb_tensor = torch.tensor(question.embedding, dtype=torch.float32).unsqueeze(0)
-    new_edge_query_embeddings = question_emb_tensor.repeat(num_new_edges, 1)
-
-    new_edge_attributes = torch.cat([new_edge_query_embeddings, neutral_trust_scores], dim=1)
+    new_edge_attributes = question_emb_tensor.repeat(num_new_edges, 1)
     
     # Combine existing edges with new edges for prediction
     temp_data = deepcopy(data)
     temp_data.edge_index = torch.cat([data.edge_index, new_edge_index], dim=1)
     temp_data.edge_attributes = torch.cat([data.edge_attributes, new_edge_attributes], dim=0)
     
-    # Update trust_scores if it exists
-    if hasattr(data, 'trust_scores') and isinstance(data.trust_scores, torch.Tensor):
-        new_trust_scores = torch.full((num_new_edges,), mean_trust, dtype=torch.float)
-        temp_data.trust_scores = torch.cat([data.trust_scores, new_trust_scores], dim=0)
+    # Update trust_scores to match the new edges
+    new_trust_scores = torch.full((num_new_edges,), mean_trust, dtype=torch.float)
+    temp_data.trust_scores = torch.cat([data.trust_scores, new_trust_scores], dim=0)
 
     # Set up prediction-specific attributes that the model expects
     temp_data.prediction_edge_index = new_edge_index  # Only predict on NEW edges
-    temp_data.edge_trust_score = new_edge_attributes[:, -1].unsqueeze(1)
-    temp_data.edge_query_embedding = new_edge_attributes[:, :-1]
+    temp_data.edge_trust_score = new_trust_scores.unsqueeze(1)
+    temp_data.edge_query_embedding = new_edge_attributes
     temp_data.prediction_source_ids = new_edge_index[0]
     temp_data.prediction_target_ids = new_edge_index[1]
     
