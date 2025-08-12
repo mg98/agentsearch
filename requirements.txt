@@ -5,6 +5,7 @@ nltk
 langchain
 langchain-ollama
 langchain-openai
+langchain-google-genai
 langchain-chroma
 langchain-nomic
 langchain-text-splitters
@@ -20,3 +21,4 @@ pymupdf
 colorama
 matplotlib
 networkx
+google-genai
