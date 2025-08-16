@@ -1,13 +1,14 @@
 model:
-  node_embedding_dim: 16
-  edge_embedding_dim: 16
-  hidden_dim: 16
+  node_embedding_dim: 64
+  edge_embedding_dim: 64
+  hidden_dim: 64
   num_layers: 1
   dropout: 0.1
   activation: "relu"
 
 training:
-  epochs: 200
+  batchsize: 1024
+  epochs: 500
   learning_rate: 0.001
   weight_decay: 1e-5
   patience: 20

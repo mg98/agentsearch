@@ -18,7 +18,8 @@ def set_seed(seed):
 def logarithmic_normalize(scores, epsilon=1e-8):
     """Apply logarithmic normalization to scores"""
     # Add small epsilon to avoid log(0)
-    log_scores = torch.log(scores + epsilon)
+    # TODO this is dumb, we need different normalization
+    log_scores = torch.log(scores + 1)
     # Normalize to have mean 0 and std 1
     normalized_scores = (log_scores - log_scores.mean()) / (log_scores.std() + epsilon)
     return normalized_scores
@@ -68,6 +69,7 @@ def create_edge_splits(graph_data, train_ratio, val_ratio, test_ratio, seed):
     test_mask[test_indices] = True
     
     # Apply logarithmic normalization within each split
+    # TODO (need to store mean and std for inverse normalization)
     y_train = logarithmic_normalize(graph_data.y[train_mask])
     y_val = logarithmic_normalize(graph_data.y[val_mask])
     y_test = logarithmic_normalize(graph_data.y[test_mask])
@@ -78,11 +80,20 @@ def create_edge_splits(graph_data, train_ratio, val_ratio, test_ratio, seed):
     y_normalized[val_mask] = y_val
     y_normalized[test_mask] = y_test
     
+    # assert that there is no data leakage
+    assert (train_mask & val_mask).sum() == 0, "Train and validation masks should not overlap."
+    assert (train_mask & test_mask).sum() == 0, "Train and test masks should not overlap."
+    assert (val_mask & test_mask).sum() == 0, "Validation and test masks should not overlap."
+    assert (train_mask | val_mask | test_mask).sum() == num_edges, "All edges should be covered by the masks."
+    assert y_normalized.size(0) == num_edges, "Normalized target tensor should match the number of edges."
+    assert np.concatenate((train_indices, val_indices, test_indices)).size == num_edges, "All edge indices should be covered by the splits."
+    assert np.unique(np.concatenate((train_indices, val_indices, test_indices))).size == num_edges, "No duplicate edge indices in splits."
+
     logging.info(f"Edge split statistics:")
     logging.info(f"  Train edges: {train_mask.sum().item()} ({train_mask.sum().item()/num_edges:.2%})")
     logging.info(f"  Val edges: {val_mask.sum().item()} ({val_mask.sum().item()/num_edges:.2%})")
     logging.info(f"  Test edges: {test_mask.sum().item()} ({test_mask.sum().item()/num_edges:.2%})")
-    
+
     return {
         'train_mask': train_mask,
         'val_mask': val_mask,

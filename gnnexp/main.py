@@ -2,7 +2,7 @@ import os
 import sys
 import yaml
 import pickle
-import torch
+import logging
 import re
 from torch_geometric.data import Data
 
@@ -53,7 +53,7 @@ def load_graph_data(data_path):
     graph_data = Data(
         x=grph['x'], # shape [num_nodes, num_node_features]
         edge_index=grph['edge_index'], # shape [2, num_edges]
-        edge_attr=grph['edge_attributes'], # shape [num_edges, num_edge_features]
+        edge_attr=grph['edge_attributes'][:, :-1], # shape [num_edges, num_edge_features]
         y=grph['trust_scores'] # shape [num_edges, 1] for edge regression
     )
     
@@ -90,14 +90,15 @@ def main():
     
     # Setup model
     print("Setting up model...")
-    model = setup_model_and_training(graph_data, config)
+    model, head = setup_model_and_training(graph_data, config)
     model = model.to(device)
+    head = head.to(device)
     
     print(f"Training on device: {device}")
     
     # Train model
-    print("Starting training...")
-    test_metrics = train_model(model, data, split_dict, config, device)
+    logging.info("Starting training...")
+    test_metrics = train_model(model, head, data, split_dict, config, device)
     
     print("\n" + "="*50)
     print("TRAINING COMPLETED!")
@@ -111,4 +112,6 @@ def main():
 
 
 if __name__ == "__main__":
+    # Set logging to INFO level
+    logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
     main()

@@ -14,3 +14,5 @@ data/
 .env
 .vscode/
 wandb/
+
+inspectdata.py

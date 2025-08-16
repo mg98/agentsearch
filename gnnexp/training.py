@@ -6,7 +6,7 @@ import wandb
 import logging
 import os
 from tqdm import tqdm
-from gnnexp.models import EdgeRegressionModel
+from gnnexp.models import HeadlessEdgeRegressionModel, EdgePredictionHead
 from data_utils import set_seed
 
 
@@ -40,66 +40,120 @@ def compute_metrics(predictions, targets):
         }
 
 
-def train_epoch(model, data, split_dict, optimizer, criterion, device):
+def train_epoch(model, head, data, split_dict, optimizer, criterion, device, batchsize=64):
     """Train for one epoch"""
     model.train()
     
-    # Forward pass
-    # we only have access to the edges in the current split
-    train_predictions = model(data.x, data.edge_index[:, split_dict["train_mask"]], data.edge_attr[split_dict["train_mask"]])
-    # predictions = model(data.x, data.edge_index, data.edge_attr)
-    
-    # Compute loss only on training edges
-    # train_predictions = train_predictions[split_dict['train_mask']]
-    train_targets = data.y[split_dict['train_mask']]
+    # we take batches from split_dict['train_indices']
+    # the edges in the batch are removed from the graph
+    # the labels of all the remaining edges are added to the edge attributes
+    # the a forward pass of MPNN is done over this graph, giving node and edge embeddings
+    # then we compute predictions for the batch edges using these embeddings and a head model
 
-    loss = criterion(train_predictions, train_targets)
-    
-    # Backward pass
-    optimizer.zero_grad()
-    loss.backward()
+    # take random batches from split_dict['train_indices'] 
+
+    # shuffle the indices for randomness
+    permutation = torch.randperm(split_dict['train_indices'].shape[0])
+    shuffled_indices = split_dict['train_indices'][permutation]
+
+    # for logging epoch stats
+    all_preds = torch.zeros_like(data.y[split_dict['train_mask']])  # to store predictions for the whole epoch
+    all_tgts = data.y[split_dict['train_mask']][permutation]
+    epoch_loss = 0.0
+
+    for i in range(0, len(shuffled_indices), batchsize):
+        # this removes the edges in the current batch from the training mask
+        batch_indices = shuffled_indices[i:i + batchsize]
+        batch_mask = torch.zeros_like(split_dict['train_mask'])
+        batch_mask[batch_indices] = True
+
+        inclusive_mask = split_dict['train_mask'] ^ batch_mask  # all edges except the current batch
+
+        assert (inclusive_mask & batch_mask).sum() == 0, "The inclusive mask and batch mask should not overlap."
+
+        # TODO we should probably put the head in a model
+        # Forward pass with all train_edges (including labels!) except for the current batch
+        node_embeddings, _ = model(
+            data.x,
+            data.edge_index[:, inclusive_mask],  # take all edges except the current batch
+            torch.cat((
+                data.edge_attr[inclusive_mask],      # take all edge attributes except the current batch
+                data.y[inclusive_mask].unsqueeze(1)),  # and add the trust score label
+                dim=1
+            )
+        )
+
+        # Add the head
+        # TODO do we need an embedding model for the edges?
+        train_predictions = head(node_embeddings, data.edge_attr[batch_mask], data.edge_index[:, batch_mask])
+        train_predictions = train_predictions.squeeze(1)
+
+        # Get the targets for the current batch
+        train_targets = data.y[batch_mask]
+
+        loss = criterion(train_predictions, train_targets)
+        # Backward pass
+        optimizer.zero_grad()
+        loss.backward()
+
+        # Store predictions for logging
+        all_preds[i:i + batchsize] = train_predictions
+        epoch_loss += loss.item()
+
+    # after the epoch is done, we step the optimizer
     optimizer.step()
     
-    # Compute metrics
-    metrics = compute_metrics(train_predictions, train_targets)
-    metrics['loss'] = loss.item()
-    
+    # Compute metrics on the last batch
+    metrics = compute_metrics(all_preds, all_tgts)
+    metrics['loss'] = epoch_loss / len(shuffled_indices)
+    metrics['LR'] = optimizer.param_groups[0]['lr']
+
+
     return metrics
 
 
-def evaluate(model, data, split_dict, criterion, device, split='val'):
+def evaluate(model, head, data, split_dict, criterion, device, split='val'):
     """Evaluate model on validation or test set"""
     model.eval()
     
     with torch.no_grad():
         # a split can use only its and previous splits' edges for inference
         if split =='val':
-            inclusive_mask = split_dict['train_mask'] + split_dict[f'val_mask']
-            # predictions are of shape [inclusive_mask.sum()]
-            # so we need to have a mask of this shape that tracks which ones are from split_dict['val_mask]
-            output_mask = split_dict['val_mask'][inclusive_mask]
+            inclusive_mask = split_dict['train_mask'] # validation uses train edges and their labels for message passing
+            target_mask = split_dict['val_mask'] # the edges that we want to predict
         elif split == 'test':
-            inclusive_mask = torch.ones_like(data.y).bool()
-            output_mask = split_dict['test_mask']
+            inclusive_mask = split_dict['train_mask'] + split_dict[f'val_mask'] # test uses train and val edges
+            target_mask = split_dict['test_mask'] # the edges that we want to predict
         else:
             raise ValueError(f"Unknown split: {split}")
-        
-    
-        predictions = model(data.x, data.edge_index[:, inclusive_mask], data.edge_attr[inclusive_mask])
-        
-        split_predictions = predictions[output_mask]
-        split_targets = data.y[split_dict[f'{split}_mask']]
-        
+
+        assert (inclusive_mask & target_mask).sum() == 0, "The inclusive mask and target mask should not overlap."
+
+        node_embeddings, _ = model(
+            data.x, 
+            data.edge_index[:, inclusive_mask], 
+            torch.cat(
+                (data.edge_attr[inclusive_mask],
+                data.y[inclusive_mask].unsqueeze(1)),  # add the trust score label
+                dim=1
+            )
+        )
+
+        split_predictions = head(node_embeddings, data.edge_attr[target_mask], data.edge_index[:, target_mask])
+        split_predictions = split_predictions.squeeze(1)
+        split_targets = data.y[target_mask]
+
         loss = criterion(split_predictions, split_targets)
         
         # Compute metrics
         metrics = compute_metrics(split_predictions, split_targets)
         metrics['loss'] = loss.item()
-        
+
+
         return metrics
 
 
-def train_model(model, data, split_dict, config, device):
+def train_model(model, head, data, split_dict, config, device):
     """Complete training loop"""
     
     # Setup training
@@ -125,10 +179,11 @@ def train_model(model, data, split_dict, config, device):
     
     for epoch in tqdm(range(config['training']['epochs']), desc="Training"):
         # Train
-        train_metrics = train_epoch(model, data, split_dict, optimizer, criterion, device)
+        train_metrics = train_epoch(model, head, data, split_dict, optimizer, criterion, device, 
+                                    batchsize=config['training']['batchsize'])
         
         # Validate
-        val_metrics = evaluate(model, data, split_dict, criterion, device, split='val')
+        val_metrics = evaluate(model, head, data, split_dict, criterion, device, split='val')
         
         # Log metrics
         if epoch % config['logging']['log_every'] == 0:
@@ -155,7 +210,7 @@ def train_model(model, data, split_dict, config, device):
         model.load_state_dict(best_model_state)
     
     # Final evaluation on test set
-    test_metrics = evaluate(model, data, split_dict, criterion, device, split='test')
+    test_metrics = evaluate(model, head, data, split_dict, criterion, device, split='test')
     
     logging.info("Training completed!")
     logging.info(f"Final Test Metrics:")
@@ -185,14 +240,19 @@ def setup_model_and_training(graph_data, config):
         level=getattr(logging, config['logging']['log_level']),
         format='%(asctime)s - %(levelname)s - %(message)s'
     )
-    
-    # Initialize model
-    model = EdgeRegressionModel(config)
-    
-    # Build model with data dimensions
     node_input_dim = graph_data.x.size(1)
     edge_input_dim = graph_data.edge_attr.size(1)
-    model.build_model(node_input_dim, edge_input_dim)
+    
+    # Initialize model
+    # the + 1 is for the trust score label
+    model = HeadlessEdgeRegressionModel(node_input_dim, edge_input_dim + 1, config)
+    head = EdgePredictionHead(
+        node_dim=config['model']['hidden_dim'],
+        edge_dim=edge_input_dim,
+        hidden_dim=config['model']['hidden_dim'],
+        output_dim=1,
+        dropout=config['model']['dropout']
+    )
     
     logging.info(f"Model initialized:")
     logging.info(f"  Node input dim: {node_input_dim}")
@@ -200,4 +260,4 @@ def setup_model_and_training(graph_data, config):
     logging.info(f"  Model parameters: {sum(p.numel() for p in model.parameters()):,}")
     print(f"  Model parameters: {sum(p.numel() for p in model.parameters()):,}")
     
-    return model
+    return model, head

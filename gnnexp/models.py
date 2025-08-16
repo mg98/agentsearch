@@ -96,7 +96,53 @@ class EdgePredictionHead(nn.Module):
         # Concatenate source, target, and edge features
         edge_features = torch.cat([src_embeddings, tgt_embeddings, edge_embeddings], dim=1)
         
+        # TODO squeeze the output to remove the last dimension
+
         return self.layers(edge_features)
+
+class HeadlessEdgeRegressionModel(nn.Module):
+    """Model for edge regression without Head, returning instead the learned node and edge embeddings"""
+    
+    def __init__(self, node_input_dim, edge_input_dim, config):
+        super().__init__()
+        
+        self.config = config
+        self.node_input_dim = node_input_dim
+        self.edge_input_dim = edge_input_dim
+
+        # Initialize components
+        self.node_embedder = NodeEmbedder(
+            input_dim=node_input_dim,
+            embedding_dim=self.config['model']['node_embedding_dim'],
+            hidden_dim=self.config['model']['hidden_dim'],
+            dropout=self.config['model']['dropout']
+        )
+        
+        self.edge_embedder = EdgeEmbedder(
+            input_dim=edge_input_dim,
+            embedding_dim=self.config['model']['edge_embedding_dim'],
+            hidden_dim=self.config['model']['hidden_dim'],
+            dropout=self.config['model']['dropout']
+        )
+        
+        self.message_passing = MessagePassingGCN(
+            input_dim=self.config['model']['node_embedding_dim'],
+            hidden_dim=self.config['model']['hidden_dim'],
+            num_layers=self.config['model']['num_layers'],
+            dropout=self.config['model']['dropout']
+        )
+
+    def forward(self, x, edge_index, edge_attr):
+        # Embed nodes and edges
+        node_embeddings = self.node_embedder(x)
+        edge_embeddings = self.edge_embedder(edge_attr)
+        
+        # Message passing
+        # TODO this needs to also include edge embeddings
+        node_embeddings = self.message_passing(node_embeddings, edge_index)
+
+        # Return node and edge embeddings
+        return node_embeddings, edge_embeddings
 
 
 class EdgeRegressionModel(nn.Module):
