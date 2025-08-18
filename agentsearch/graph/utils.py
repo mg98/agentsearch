@@ -2,6 +2,15 @@ import numpy as np
 import networkx as nx
 from pyvis.network import Network
 from agentsearch.graph.types import GraphData
+from agentsearch.dataset.agents import Agent
+from dataclasses import dataclass
+from agentsearch.dataset.questions import Question
+
+def compute_trust_score(num_sources: int) -> float:
+    max_sources = 100
+    if num_sources > max_sources:
+        num_sources = max_sources
+    return np.log(num_sources + 1) / np.log(max_sources + 1)
 
 def visualize_graph(data: GraphData, title="Graph Visualization", hide_isolated_nodes=True, output_file="graph.html"):
     """Visualizes the graph with edge colors based on trust score using pyvis."""
@@ -105,3 +114,59 @@ def visualize_graph(data: GraphData, title="Graph Visualization", hide_isolated_
     net.save_graph(output_file)
     print(f"Graph visualization saved to {output_file}")
     return net
+
+
+def apply_adversarial_attack(graph: GraphData, attack_vol: float) -> GraphData:
+    """
+    Apply adversarial attack to a graph by flipping trust scores for a portion of agents.
+    
+    Args:
+        graph: The base GraphData object with honest trust scores
+        attack_vol: Float between 0 and 1 indicating the fraction of agents to make adversarial
+    
+    Returns:
+        A new GraphData object with manipulated trust scores
+    """
+    manipulated_graph = graph.clone()
+    core_agent_idx = 0
+    
+    # Find direct target agents by looking at edges from core agent
+    direct_target_indices = set()
+    for edge_idx in range(graph.edge_index.size(1)):
+        source_idx = graph.edge_index[0, edge_idx].item()
+        target_idx = graph.edge_index[1, edge_idx].item()
+        if source_idx == core_agent_idx:
+            direct_target_indices.add(target_idx)
+    
+    # Also find agents that have edges TO any node (i.e., agents that asked questions)
+    # These are the agents that could be adversarial
+    agents_with_outgoing_edges = set()
+    for edge_idx in range(graph.edge_index.size(1)):
+        source_idx = graph.edge_index[0, edge_idx].item()
+        if source_idx != core_agent_idx:
+            agents_with_outgoing_edges.add(source_idx)
+    
+    # The agents that can be adversarial are those in direct_target_indices 
+    # that also have outgoing edges
+    potential_adversarial = sorted(list(direct_target_indices & agents_with_outgoing_edges))
+    
+    # Determine which agents are adversarial
+    num_adversarial = int(attack_vol * len(potential_adversarial))
+    adversarial_agent_indices = set(potential_adversarial[:num_adversarial])
+    
+    # Iterate through all edges and flip trust scores from adversarial agents
+    for edge_idx in range(manipulated_graph.edge_index.size(1)):
+        source_idx = manipulated_graph.edge_index[0, edge_idx].item()
+        if source_idx in adversarial_agent_indices:
+            manipulated_graph.trust_scores[edge_idx] = 1 - manipulated_graph.trust_scores[edge_idx]
+    
+    manipulated_graph.finalize_features()
+    
+    return manipulated_graph
+
+@dataclass
+class Experience:
+    source_agent: Agent
+    target_agent: Agent
+    question: Question
+    score: float

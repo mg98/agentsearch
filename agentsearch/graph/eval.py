@@ -24,9 +24,8 @@ if __name__ == '__main__':
         data = pickle.load(f)
         graph_data: GraphData = data['graph']
         graph_data.finalize_features()
-        all_questions: list[Question] = data['questions']
-        total_questions_asked: int = data['total_questions_asked']
         core_agent: Agent = data['core_agent']
+        test_questions: list[Question] = data['test_questions']
 
     # Print trust bounds for debugging
     print(f"Original trust bounds: min={graph_data.original_trust_min}, max={graph_data.original_trust_max}")
@@ -34,29 +33,24 @@ if __name__ == '__main__':
     # Instantiate the model
     node_feature_dim = graph_data.x.size(1)
     model = TrustGNN(num_nodes=len(graph_data.agents), node_feature_dim=node_feature_dim)
-    evaluate_and_predict(model, graph_data, title="Predictions Before Training")
+    # evaluate_and_predict(model, graph_data, title="Predictions Before Training")
     
     best_val_loss = train_model(model, graph_data)
     print(f"Training completed with best validation loss: {best_val_loss:.6f}")
     
     evaluate_and_predict(model, graph_data, title="Predictions After Training")
-    # sys.exit()
 
     # Track top-1 performance data
     gnn_predicted_scores = []
     gnn_actual_grades = []
     matched_predicted_scores = []
     matched_actual_grades = []
-    question_texts = []
     
     # Evaluate questions and track top-1 performance
     print(f"{Fore.BLUE}{'-'*100}{Style.RESET_ALL}")
-    num_questions = 100
+    num_questions = len(test_questions)
     
-    for i in range(num_questions):
-        q = all_questions[total_questions_asked+i]
-        question_texts.append(q.question[:50] + "..." if len(q.question) > 50 else q.question)
-
+    for i, q in enumerate(test_questions):
         print(f"\n{Fore.GREEN}Question {i+1}/{num_questions}: {Style.BRIGHT}\"{q.question[:100]}...\"{Style.RESET_ALL}")
 
         source_idx = graph_data.agent_id_to_index[core_agent.id]

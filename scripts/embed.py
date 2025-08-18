@@ -3,8 +3,7 @@ from tqdm import tqdm
 from langchain_chroma import Chroma
 from langchain_core.documents import Document
 from agentsearch.dataset.questions import questions_store, questions_df
-from agentsearch.dataset.agents import agents_store, agents_df
-from agentsearch.dataset.agents import Agent
+from agentsearch.dataset.agents import Agent, AgentStore
 from agentsearch.utils.globals import db_location, embeddings
 
 def create_paper_collection(agent: Agent):
@@ -44,17 +43,20 @@ def create_question_collection():
         ids=[str(i) for i in questions_df.index.tolist()]
     )
 
-def create_agent_collection():
-    agents = Agent.all(shallow=True)
+def create_agent_collection(agent_store: AgentStore):
+    agent_store._store.reset_collection()
+    agents = agent_store.all(shallow=True)
 
     documents = [Document(
-        page_content=", ".join(agent.research_fields),
+        page_content=agent.agent_card,
         metadata={
             "name": agent.name,
-            "scholar_url": agent.scholar_url
+            "scholar_url": agent.scholar_url,
+            "citation_count": agent.citation_count,
+            "agent_card": agent.agent_card,
         }) for agent in agents]
     
-    agents_store.add_documents(
+    agent_store._store.add_documents(
         documents=documents,
         ids=[str(agent.id) for agent in agents]
     )
@@ -72,9 +74,12 @@ if __name__ == "__main__":
         print("Creating question collection...")
         create_question_collection()
     elif mode == 'agents':
-        agents_store.reset_collection()
-        print("Creating agents collection...")
-        create_agent_collection()
+        print("Creating agents collection with LLM agent cards...")
+        agent_store = AgentStore(use_llm_agent_card=True)
+        create_agent_collection(agent_store)
+        print("Creating agents collection with human agent cards...")
+        agent_store = AgentStore(use_llm_agent_card=False)
+        create_agent_collection(agent_store)
     elif mode == 'papers':  # papers mode
         print("Creating paper collections...")
         for agent in tqdm(Agent.all(shallow=True), desc="Agents"):

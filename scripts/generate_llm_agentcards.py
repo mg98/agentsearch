@@ -4,9 +4,8 @@ import os
 import json
 import time
 from tqdm import tqdm
-from google import genai
-from google.genai import types
-from google.genai.types import JobState
+import openai
+from openai import OpenAI
 from agentsearch.dataset.agents import Agent, agents_df
 
 def get_agent_publications(agent: Agent) -> str:
@@ -48,14 +47,14 @@ def get_agent_publications(agent: Agent) -> str:
 
 def create_batch_request(agent_id: str, publications: str) -> dict:
     """
-    Create a batch request for the Gemini API.
+    Create a batch request for the OpenAI API.
     
     Args:
-        agent_id: The agent ID to use as key
+        agent_id: The agent ID to use as custom_id
         publications: Concatenated string of all publications
     
     Returns:
-        Dictionary containing the batch request
+        Dictionary containing the batch request in OpenAI format
     """
     system_message = """
     You are an expert at analyzing academic publications and creating concise summaries.
@@ -65,29 +64,27 @@ def create_batch_request(agent_id: str, publications: str) -> dict:
     """
     
     return {
-        "key": agent_id,
-        "request": {
-            "contents": [
-                {
-                    "parts": [
-                        {"text": system_message},
-                        {"text": publications}
-                    ]
-                }
+        "custom_id": str(agent_id),  # Convert to string as required by OpenAI
+        "method": "POST",
+        "url": "/v1/chat/completions",
+        "body": {
+            "model": "gpt-4.1-mini-2025-04-14",
+            "messages": [
+                {"role": "system", "content": system_message},
+                {"role": "user", "content": publications}
             ],
-            "generationConfig": {
-                "temperature": 0.3
-            }
+            "temperature": 0.3,
+            "max_tokens": 1000
         }
     }
 
 
 def main():
-    api_key = os.getenv('GOOGLE_API_KEY')
+    api_key = os.getenv('OPENAI_API_KEY')
     if not api_key:
-        raise ValueError("Please set GOOGLE_API_KEY environment variable")
+        raise ValueError("Please set OPENAI_API_KEY environment variable")
     
-    client = genai.Client(api_key=api_key)
+    client = OpenAI(api_key=api_key)
     
     batch_requests_file = "batch_requests.jsonl"
     csv_file = "data/agentcards.csv"
@@ -98,7 +95,7 @@ def main():
     batch_requests = []
     agent_info = {}
     
-    for agent_id in tqdm(agents_df.index[:100], desc="Collecting publications"):
+    for agent_id in tqdm(agents_df.index[200:], desc="Collecting publications"):
         agent = Agent.from_id(agent_id, shallow=True)
         publications = get_agent_publications(agent)
         
@@ -107,12 +104,8 @@ def main():
             agent_info[agent_id] = {"name": agent.name, "error": "No publications found"}
             continue
         
-        # Check if publications are too long (Gemini has token limits)
-        # Approximate: 1 token ≈ 4 characters
-        if len(publications) > 4000000:  # ~1M tokens
-            # Truncate to fit within limits
-            publications = publications[:4000000]
-            print(f"Truncated publications for {agent.name} due to length")
+        # Truncate to fit within context limits
+        publications = publications[:1_000_000*4]
         
         # Create batch request
         batch_request = create_batch_request(agent_id, publications)
@@ -132,52 +125,68 @@ def main():
     
     # Upload batch requests file
     print("Uploading batch requests...")
-    uploaded_file = client.files.upload(
-        file=batch_requests_file,
-        config=types.UploadFileConfig(display_name='my-batch-requests', mime_type='jsonl')
-    )
+    with open(batch_requests_file, 'rb') as file:
+        batch_input_file = client.files.create(
+            file=file,
+            purpose="batch"
+        )
     
     # Create batch job
     print("Creating batch job...")
     batch_job = client.batches.create(
-        model="gemini-2.5-flash-lite",
-        src=uploaded_file.name
+        input_file_id=batch_input_file.id,
+        endpoint="/v1/chat/completions",
+        completion_window="24h"
     )
     
-    print(f"Batch job created: {batch_job.name}")
+    print(f"Batch job created: {batch_job.id}")
     print("Waiting for batch job to complete...")
     
-    while True:
-        if batch_job.state.name in ['JOB_STATE_SUCCEEDED', 'JOB_STATE_FAILED', 'JOB_STATE_CANCELLED', 'JOB_STATE_EXPIRED']:
-            break
+    while batch_job.status not in ['completed', 'failed', 'cancelled', 'expired']:
         time.sleep(30)  # Wait 30 seconds before checking again
-        batch_job = client.batches.get(name=batch_job.name)
-        print(f"Batch job status: {batch_job.state}")
+        batch_job = client.batches.retrieve(batch_job.id)
+        print(f"Batch job status: {batch_job.status}")
     
-    print(f"Job finished with state: {batch_job.state.name}")
+    print(f"Job finished with status: {batch_job.status}")
     
-    results_content = client.files.download(file=batch_job.dest.file_name)
+    if batch_job.status != 'completed':
+        print(f"Batch job failed with status: {batch_job.status}")
+        if batch_job.errors:
+            print(f"Errors: {batch_job.errors}")
+        return
+    
+    # Download results
+    result_file_id = batch_job.output_file_id
+    results_content = client.files.content(result_file_id).read()
     
     # Parse results and write to CSV
     successful_count = 0
     failed_count = 0
     
-    with open(csv_file, 'w', newline='', encoding='utf-8') as f:
+    with open(csv_file, 'a', newline='', encoding='utf-8') as f:
         writer = csv.writer(f)
-        writer.writerow(["agent_id", "agent_card"])
+        # writer.writerow(["agent_id", "agent_card"])
         
         # Process results
         for line in results_content.decode('utf-8').strip().split('\n'):
             result = json.loads(line)
-            agent_id = result['key']
+            agent_id = int(result['custom_id'])  # Convert back to int for lookup
             
-            if 'response' in result and 'candidates' in result['response']:
+            if 'response' in result and result['response'] and 'body' in result['response']:
                 # Success case
-                content = result['response']['candidates'][0]['content']['parts'][0]['text']
-                writer.writerow([agent_id, content])
-                successful_count += 1
-                agent_name = agent_info[agent_id]["name"]
-                print(f"Generated card for {agent_name}")
+                response_body = result['response']['body']
+                if 'choices' in response_body and response_body['choices']:
+                    content = response_body['choices'][0]['message']['content']
+                    writer.writerow([agent_id, content])
+                    successful_count += 1
+                    agent_name = agent_info[agent_id]["name"]
+                    print(f"Generated card for {agent_name}")
+                else:
+                    error_msg = "No content in response"
+                    writer.writerow([agent_id, f"ERROR: {error_msg}"])
+                    failed_count += 1
+                    agent_name = agent_info[agent_id]["name"]
+                    print(f"Failed to generate card for {agent_name}: {error_msg}")
             else:
                 # Error case
                 error_msg = result.get('error', {}).get('message', 'Unknown error')
