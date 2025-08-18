@@ -165,7 +165,7 @@ def apply_adversarial_attack(graph: GraphData, attack_vol: float) -> GraphData:
     return manipulated_graph
 
 @dataclass
-class Experience:
+class Interaction:
     source_agent: Agent
     target_agent: Agent
     question: Question

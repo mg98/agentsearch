@@ -6,7 +6,8 @@ import time
 from tqdm import tqdm
 import openai
 from openai import OpenAI
-from agentsearch.dataset.agents import Agent, agents_df
+import tiktoken
+from agentsearch.dataset.agents import Agent, AgentStore, agents_df
 
 def get_agent_publications(agent: Agent) -> str:
     """
@@ -85,6 +86,7 @@ def main():
         raise ValueError("Please set OPENAI_API_KEY environment variable")
     
     client = OpenAI(api_key=api_key)
+    encoding = tiktoken.encoding_for_model("gpt-4")
     
     batch_requests_file = "batch_requests.jsonl"
     csv_file = "data/agentcards.csv"
@@ -95,8 +97,10 @@ def main():
     batch_requests = []
     agent_info = {}
     
-    for agent_id in tqdm(agents_df.index[200:], desc="Collecting publications"):
-        agent = Agent.from_id(agent_id, shallow=True)
+    agent_store = AgentStore(use_llm_agent_card=False)
+
+    for agent_id in tqdm([508], desc="Collecting publications"):
+        agent = agent_store.from_id(agent_id, shallow=True)
         publications = get_agent_publications(agent)
         
         if not publications:
@@ -104,8 +108,13 @@ def main():
             agent_info[agent_id] = {"name": agent.name, "error": "No publications found"}
             continue
         
-        # Truncate to fit within context limits
-        publications = publications[:1_000_000*4]
+        # Truncate to 1M tokens using tiktoken
+        tokens = encoding.encode(publications)
+        
+        if len(tokens) > 1_000_000:
+            print(f"Truncating publications for {agent.name} from {len(tokens):,} to 1,000,000 tokens")
+            truncated_tokens = tokens[:1_000_000]
+            publications = encoding.decode(truncated_tokens)
         
         # Create batch request
         batch_request = create_batch_request(agent_id, publications)

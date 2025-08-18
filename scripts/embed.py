@@ -35,7 +35,7 @@ def create_question_collection():
     documents = [Document(
         page_content=row['question'],
         metadata={
-            "agent_id": row['agent_id']
+            "agent_id": int(row['agent_id'])  # Convert numpy int64 to Python int
         }) for _, row in questions_df.iterrows()]
     
     questions_store.add_documents(
@@ -50,10 +50,10 @@ def create_agent_collection(agent_store: AgentStore):
     documents = [Document(
         page_content=agent.agent_card,
         metadata={
-            "name": agent.name,
-            "scholar_url": agent.scholar_url,
-            "citation_count": agent.citation_count,
-            "agent_card": agent.agent_card,
+            "name": str(agent.name),
+            "scholar_url": str(agent.scholar_url),
+            "citation_count": int(agent.citation_count),
+            "agent_card": str(agent.agent_card),
         }) for agent in agents]
     
     agent_store._store.add_documents(
@@ -76,11 +76,13 @@ if __name__ == "__main__":
     elif mode == 'agents':
         print("Creating agents collection with LLM agent cards...")
         agent_store = AgentStore(use_llm_agent_card=True)
+        agents = agent_store.all(shallow=True)
         create_agent_collection(agent_store)
+
         print("Creating agents collection with human agent cards...")
         agent_store = AgentStore(use_llm_agent_card=False)
         create_agent_collection(agent_store)
-    elif mode == 'papers':  # papers mode
+    elif mode == 'papers':
         print("Creating paper collections...")
         for agent in tqdm(Agent.all(shallow=True), desc="Agents"):
             agent.load_papers()
@@ -90,29 +92,3 @@ if __name__ == "__main__":
         sys.exit(1)
     
     print(f"Successfully created {mode} collection")
-
-    
-    # response = input("This will delete chroma_db, are you sure you want to proceed? (y/n): ")
-    # if response.lower() != 'y':
-    #     print("Aborting...")
-    #     exit()
-    
-    # shutil.rmtree(db_location, ignore_errors=True)
-
-    # from agentsearch.dataset.agents import agents_store, agents_df
-    # from agentsearch.dataset.questions import questions_store, questions_df
-
-    # # Create question collection
-    # print("Creating question collection...")
-    # create_question_collection()
-
-    # # Create question collection
-    # print("Creating authors collection...")
-    # create_agent_collection()
-
-    # # Create paper collection
-    # print("Creating paper collection...")
-    # for id, _ in agents_df.iterrows():
-    #     create_paper_collection(id)
-
-   

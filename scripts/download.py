@@ -170,7 +170,7 @@ def download_paper(agent_id: str, s2_paper: s2.Paper) -> bool:
     return False
 
 if __name__ == "__main__":
-    agents_df = pd.read_csv('data/authors.csv', index_col=0)
+    agents_df = pd.read_csv('data/agents.csv', index_col=0)
     
     # Segmented progress bar for success/failure tracking
     progress = Progress(

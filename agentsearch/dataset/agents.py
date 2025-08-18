@@ -11,13 +11,17 @@ import numpy as np
 from agentsearch.dataset.papers import Paper
 from agentsearch.utils.globals import db_location, embeddings
 
-agents_df = pd.read_csv('data/authors.csv', index_col=0)
+agents_df = pd.read_csv('data/agents.csv', index_col=0)
 agents_df = agents_df[agents_df.index.astype(str).isin(os.listdir("papers/pdf"))]
 agents_df['research_fields'] = agents_df['research_fields'].apply(literal_eval)
 agents_df = agents_df[agents_df['research_fields'].apply(len) > 0]
+agents_df = agents_df.sample(frac=1).reset_index(drop=True)
+
 
 # Load LLM-generated agent cards
 agentcards_df = pd.read_csv('data/agentcards.csv', index_col=0)
+agentcards_df = agentcards_df.reindex(agents_df.index)
+
 
 @dataclass
 class Agent:
