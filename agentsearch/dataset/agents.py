@@ -10,13 +10,16 @@ from agentsearch.dataset.questions import questions_store
 import numpy as np
 from agentsearch.dataset.papers import Paper
 from agentsearch.utils.globals import db_location, embeddings
+import warnings
 
 agents_df = pd.read_csv('data/agents.csv', index_col=0)
-agents_df = agents_df[agents_df.index.astype(str).isin(os.listdir("papers/pdf"))]
+if os.path.exists("papers/pdf"):
+    agents_df = agents_df[agents_df.index.astype(str).isin(os.listdir("papers/pdf"))]
+else:
+    warnings.warn("no papers/pdf directory found")
 agents_df['research_fields'] = agents_df['research_fields'].apply(literal_eval)
 agents_df = agents_df[agents_df['research_fields'].apply(len) > 0]
-agents_df = agents_df.sample(frac=1).reset_index(drop=True)
-
+agents_df = agents_df.sample(frac=1)
 
 # Load LLM-generated agent cards
 agentcards_df = pd.read_csv('data/agentcards.csv', index_col=0)
@@ -33,7 +36,20 @@ class Agent:
     papers: list[Paper]
     embedding: np.ndarray
 
-    _store: Chroma
+    _store: Chroma | None = None
+
+    @classmethod
+    def make_dummy(cls, id=0) -> 'Agent':
+        return Agent(
+            id=id,
+            name="Dummy Agent",
+            citation_count=0,
+            scholar_url="",
+            agent_card="",
+            papers=[],
+            embedding=None,
+            _store=None
+        )
     
     def load_embedding(self):
         result = self._store._collection.get(
@@ -64,6 +80,10 @@ class Agent:
     def count_sources(self, question: str) -> int:
         sources = retrieve(self.id, question)
         return len(sources)
+    
+    def has_sources(self, question: str) -> bool:
+        sources = retrieve(self.id, question, k=1)
+        return len(sources) > 0
 
 @dataclass
 class AgentMatch:
@@ -129,7 +149,7 @@ class AgentStore:
         
         return agents
 
-    def match_by_qid(self, qid: int, top_k: int = 1, whitelist: list[int] = []) -> list[AgentMatch]:
+    def match_by_qid(self, qid: int, top_k: int = 1) -> list[AgentMatch]:
         """
         Match a question to the most similar agents based on Agent Card
         
@@ -151,8 +171,7 @@ class AgentStore:
         search_results: QueryResult = self._store._collection.query(
             query_embeddings=[question_embedding],
             n_results=top_k,
-            include=['documents', 'distances'],
-            ids=[str(id) for id in whitelist]
+            include=['documents', 'distances']
         )
         matches: list[AgentMatch] = []
         if search_results['distances'] is not None:

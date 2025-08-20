@@ -53,7 +53,7 @@ def evaluate_agent_card_matching():
         
         # Get top-1 matched agent
         print(qid)
-        matches = agent_store.match_by_qid(qid, top_k=1, whitelist=agent_ids)
+        matches = agent_store.match_by_qid(qid, top_k=1)
         matched_agent = matches[0].agent
         score = compute_trust_score(matched_agent.count_sources(question.question))
         scores.append(score) 
