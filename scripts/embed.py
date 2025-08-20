@@ -3,8 +3,7 @@ from tqdm import tqdm
 from langchain_chroma import Chroma
 from langchain_core.documents import Document
 from agentsearch.dataset.questions import questions_store, questions_df
-from agentsearch.dataset.agents import agents_store, agents_df
-from agentsearch.dataset.agents import Agent
+from agentsearch.dataset.agents import Agent, AgentStore
 from agentsearch.utils.globals import db_location, embeddings
 
 def create_paper_collection(agent: Agent):
@@ -36,7 +35,7 @@ def create_question_collection():
     documents = [Document(
         page_content=row['question'],
         metadata={
-            "agent_id": row['agent_id']
+            "agent_id": int(row['agent_id'])  # Convert numpy int64 to Python int
         }) for _, row in questions_df.iterrows()]
     
     questions_store.add_documents(
@@ -44,17 +43,20 @@ def create_question_collection():
         ids=[str(i) for i in questions_df.index.tolist()]
     )
 
-def create_agent_collection():
-    agents = Agent.all(shallow=True)
+def create_agent_collection(agent_store: AgentStore):
+    agent_store._store.reset_collection()
+    agents = agent_store.all(shallow=True)
 
     documents = [Document(
-        page_content=", ".join(agent.research_fields),
+        page_content=agent.agent_card,
         metadata={
-            "name": agent.name,
-            "scholar_url": agent.scholar_url
+            "name": str(agent.name),
+            "scholar_url": str(agent.scholar_url),
+            "citation_count": int(agent.citation_count),
+            "agent_card": str(agent.agent_card),
         }) for agent in agents]
     
-    agents_store.add_documents(
+    agent_store._store.add_documents(
         documents=documents,
         ids=[str(agent.id) for agent in agents]
     )
@@ -72,10 +74,15 @@ if __name__ == "__main__":
         print("Creating question collection...")
         create_question_collection()
     elif mode == 'agents':
-        agents_store.reset_collection()
-        print("Creating agents collection...")
-        create_agent_collection()
-    elif mode == 'papers':  # papers mode
+        print("Creating agents collection with LLM agent cards...")
+        agent_store = AgentStore(use_llm_agent_card=True)
+        agents = agent_store.all(shallow=True)
+        create_agent_collection(agent_store)
+
+        print("Creating agents collection with human agent cards...")
+        agent_store = AgentStore(use_llm_agent_card=False)
+        create_agent_collection(agent_store)
+    elif mode == 'papers':
         print("Creating paper collections...")
         for agent in tqdm(Agent.all(shallow=True), desc="Agents"):
             agent.load_papers()
@@ -85,29 +92,3 @@ if __name__ == "__main__":
         sys.exit(1)
     
     print(f"Successfully created {mode} collection")
-
-    
-    # response = input("This will delete chroma_db, are you sure you want to proceed? (y/n): ")
-    # if response.lower() != 'y':
-    #     print("Aborting...")
-    #     exit()
-    
-    # shutil.rmtree(db_location, ignore_errors=True)
-
-    # from agentsearch.dataset.agents import agents_store, agents_df
-    # from agentsearch.dataset.questions import questions_store, questions_df
-
-    # # Create question collection
-    # print("Creating question collection...")
-    # create_question_collection()
-
-    # # Create question collection
-    # print("Creating authors collection...")
-    # create_agent_collection()
-
-    # # Create paper collection
-    # print("Creating paper collection...")
-    # for id, _ in agents_df.iterrows():
-    #     create_paper_collection(id)
-
-   

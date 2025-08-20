@@ -1,188 +1,111 @@
-import torch
-import random
-import pickle
 import os
 import numpy as np
+import pandas as pd
 from colorama import init, Fore, Style
-from agentsearch.dataset.agents import Agent
+from agentsearch.dataset.agents import AgentStore
 from agentsearch.dataset.questions import Question
-from agentsearch.dataset import agents
-from agentsearch.graph.types import GraphData, TrustGNN
-from agentsearch.graph.training import train_model, evaluate_and_predict, predict_top_targets, predict_trust_scores
+from agentsearch.graph.utils import compute_trust_score
 
 # Initialize colorama
 init(autoreset=True)
 
-random.seed(42)
-
-if __name__ == '__main__':
-    if not os.path.exists('data/graph.pkl'):
-        print("Error: data/graph.pkl file not found")
-        exit(1)
+def evaluate_agent_card_matching():
+    """Evaluate top-1 agent card matching for questions from test_qids.txt"""
     
-    with open('data/graph.pkl', 'rb') as f:
-        data = pickle.load(f)
-        graph_data: GraphData = data['graph']
-        graph_data.finalize_features()
-        all_questions: list[Question] = data['questions']
-        total_questions_asked: int = data['total_questions_asked']
-        core_agent: Agent = data['core_agent']
-
-    # Print trust bounds for debugging
-    print(f"Original trust bounds: min={graph_data.original_trust_min}, max={graph_data.original_trust_max}")
+    # Check if test_qids.txt exists
+    test_qids_path = 'data/test_qids.txt'
+    if not os.path.exists(test_qids_path):
+        print(f"{Fore.RED}Error: {test_qids_path} file not found{Style.RESET_ALL}")
+        print(f"{Fore.YELLOW}Please create a comma-separated list of question IDs in {test_qids_path}{Style.RESET_ALL}")
+        return
     
-    # Instantiate the model
-    node_feature_dim = graph_data.x.size(1)
-    model = TrustGNN(num_nodes=len(graph_data.agents), node_feature_dim=node_feature_dim)
-    evaluate_and_predict(model, graph_data, title="Predictions Before Training")
+    # Load question IDs from file
+    with open(test_qids_path, 'r') as f:
+        content = f.read().strip()
+        if not content:
+            print(f"{Fore.RED}Error: {test_qids_path} is empty{Style.RESET_ALL}")
+            return
+        test_qids = [int(qid.strip()) for qid in content.split(',')]
     
-    best_val_loss = train_model(model, graph_data)
-    print(f"Training completed with best validation loss: {best_val_loss:.6f}")
+    print(f"{Fore.GREEN}Loaded {len(test_qids)} question IDs from {test_qids_path}{Style.RESET_ALL}")
     
-    evaluate_and_predict(model, graph_data, title="Predictions After Training")
-    # sys.exit()
-
-    # Track top-1 performance data
-    gnn_predicted_scores = []
-    gnn_actual_grades = []
-    matched_predicted_scores = []
-    matched_actual_grades = []
-    question_texts = []
+    # Initialize the agent store (using LLM agent cards)
+    agent_store = AgentStore(use_llm_agent_card=False)
     
-    # Evaluate questions and track top-1 performance
-    print(f"{Fore.BLUE}{'-'*100}{Style.RESET_ALL}")
-    num_questions = 100
+    # Get all available agents
+    all_agents = agent_store.all(shallow=True)
+    agent_ids = [agent.id for agent in all_agents]
+    print(f"{Fore.CYAN}Found {len(agent_ids)} agents in the database{Style.RESET_ALL}")
     
-    for i in range(num_questions):
-        q = all_questions[total_questions_asked+i]
-        question_texts.append(q.question[:50] + "..." if len(q.question) > 50 else q.question)
-
-        print(f"\n{Fore.GREEN}Question {i+1}/{num_questions}: {Style.BRIGHT}\"{q.question[:100]}...\"{Style.RESET_ALL}")
-
-        source_idx = graph_data.agent_id_to_index[core_agent.id]
-
-        # Create prediction data for all possible target agents
-        all_target_indices = [j for j in range(len(graph_data.agents)) if j != source_idx]
+    # Track performance metrics
+    scores = []
+    
+    print(f"\n{Fore.BLUE}{'='*100}{Style.RESET_ALL}")
+    print(f"{Fore.CYAN}Starting Top-1 Agent Card Matching Evaluation{Style.RESET_ALL}")
+    print(f"{Fore.BLUE}{'='*100}{Style.RESET_ALL}")
+    
+    # Evaluate each question
+    for i, qid in enumerate(test_qids):
+        # Load the question
+        question = Question.from_id(qid)
+        print(f"\n{Fore.GREEN}Question {i+1}/{len(test_qids)} (ID: {qid}):{Style.RESET_ALL}")
+        print(f"{Style.BRIGHT}\"{question.question[:100]}{'...' if len(question.question) > 100 else ''}\"{Style.RESET_ALL}")
         
-        # === GNN TOP-1 PREDICTION ===
-        # Predict trust scores using GNN
-        all_predicted_scores = predict_trust_scores(model, graph_data, source_idx, all_target_indices, q)
+        # Get top-1 matched agent
+        print(qid)
+        matches = agent_store.match_by_qid(qid, top_k=1, whitelist=agent_ids)
+        matched_agent = matches[0].agent
+        score = compute_trust_score(matched_agent.count_sources(question.question))
+        scores.append(score) 
         
-        # Get top-1 predicted agent by GNN
-        top_1_idx_gnn = torch.argsort(torch.tensor(all_predicted_scores), descending=True)[0]
-        
-        gnn_agent = graph_data.agents[all_target_indices[top_1_idx_gnn]]
-        gnn_predicted_score = all_predicted_scores[top_1_idx_gnn]
-        gnn_raw_grade = gnn_agent.ask(q.question)
-        gnn_actual_grade = graph_data.normalize_single_score(gnn_raw_grade)
-        
-        # Store GNN top-1 results
-        gnn_predicted_scores.append(gnn_predicted_score)
-        gnn_actual_grades.append(gnn_actual_grade)
-        
-        print(f"{Fore.YELLOW}GNN TOP-1:\t{gnn_agent.name} | Actual: {Fore.GREEN if gnn_actual_grade > 0.5 else Fore.RED}{gnn_actual_grade:.3f}{Style.RESET_ALL} | Predicted: {Fore.CYAN}{gnn_predicted_score:.3f}{Style.RESET_ALL}")
-        
-        # === MATCHED TOP-1 AGENT ===
-        # Get top-1 matched agent (original matching algorithm)
-        matches = agents.match_by_qid(q.id, 1, whitelist=[agent.id for agent in graph_data.agents])
-        
-        if matches:
-            matched_agent = matches[0].agent
-            matched_target_idx = graph_data.agent_id_to_index[matched_agent.id]
-            
-            # Predict trust score for matched agent using GNN
-            matched_predicted_score = predict_trust_scores(model, graph_data, source_idx, [matched_target_idx], q)[0]
-            matched_raw_grade = matched_agent.ask(q.question)
-            matched_actual_grade = graph_data.normalize_single_score(matched_raw_grade)
-            
-            # Store matched top-1 results
-            matched_predicted_scores.append(matched_predicted_score)
-            matched_actual_grades.append(matched_actual_grade)
-            
-            print(f"{Fore.YELLOW}MATCHED TOP-1:\t{matched_agent.name} | Actual: {Fore.GREEN if matched_actual_grade > 0.5 else Fore.RED}{matched_actual_grade:.3f}{Style.RESET_ALL} | Predicted: {Fore.CYAN}{matched_predicted_score:.3f}{Style.RESET_ALL}")
-        else:
-            # Handle case where no matches found
-            matched_predicted_scores.append(0.5)
-            matched_actual_grades.append(0.5)
-            print(f"{Fore.RED}No matched agents found{Style.RESET_ALL}")
-
+        print(f"{Fore.YELLOW}Matched Agent:{Style.RESET_ALL} {matched_agent.name}")
+        print(f"{Fore.YELLOW}Answer Quality Grade:{Style.RESET_ALL} {Fore.GREEN if score > 0.5 else Fore.RED}{score:.3f}{Style.RESET_ALL}")
         print(f"{Fore.BLUE}{'-' * 80}{Style.RESET_ALL}")
-
-    # Convert to numpy arrays for analysis
-    gnn_predicted = np.array(gnn_predicted_scores)
-    gnn_actual = np.array(gnn_actual_grades)
-    matched_predicted = np.array(matched_predicted_scores)
-    matched_actual = np.array(matched_actual_grades)
+    
+    # Convert to numpy array for analysis
+    scores = np.array(scores)
     
     # Print performance summary
-    print(f"\n{Fore.CYAN}=== PERFORMANCE SUMMARY ==={Style.RESET_ALL}")
+    print(f"\n{Fore.CYAN}{'='*50}{Style.RESET_ALL}")
+    print(f"{Fore.CYAN}PERFORMANCE SUMMARY - TOP-1 AGENT CARD MATCHING{Style.RESET_ALL}")
+    print(f"{Fore.CYAN}{'='*50}{Style.RESET_ALL}")
     
-    # Calculate metrics
-    gnn_mse = np.mean((gnn_predicted - gnn_actual) ** 2)
-    matched_mse = np.mean((matched_predicted - matched_actual) ** 2)
-    gnn_mae = np.mean(np.abs(gnn_predicted - gnn_actual))
-    matched_mae = np.mean(np.abs(matched_predicted - matched_actual))
-    gnn_corr = np.corrcoef(gnn_predicted, gnn_actual)[0, 1]
-    matched_corr = np.corrcoef(matched_predicted, matched_actual)[0, 1]
+    print(f"\n{Fore.GREEN}Overall Statistics:{Style.RESET_ALL}")
+    print(f"  Total Questions: {len(scores)}")
+    print(f"  Mean Grade: {scores.mean():.4f}")
+    print(f"  Median Grade: {np.median(scores):.4f}")
+    print(f"  Std Dev: {scores.std():.4f}")
+    print(f"  Min Grade: {scores.min():.4f}")
+    print(f"  Max Grade: {scores.max():.4f}")
+    print(f"  25th Percentile: {np.percentile(scores, 25):.4f}")
+    print(f"  75th Percentile: {np.percentile(scores, 75):.4f}")
     
-    print(f"{Fore.GREEN}GNN Top-1 Performance:{Style.RESET_ALL}")
-    print(f"  MSE: {gnn_mse:.4f}")
-    print(f"  MAE: {gnn_mae:.4f}")
-    print(f"  Correlation: {gnn_corr:.4f}")
-    print(f"  Mean Actual Grade: {gnn_actual.mean():.3f}")
-    print(f"  Mean Predicted Score: {gnn_predicted.mean():.3f}")
+    # Count successful vs unsuccessful matches
+    successful = np.sum(scores > 0)
+    print(f"\n{Fore.GREEN}Success Rate:{Style.RESET_ALL}")
+    print(f"  Successful Answers: {successful}/{len(scores)} ({100*successful/len(scores):.1f}%)")
+    print(f"  Failed Answers: {len(scores)-successful}/{len(scores)} ({100*(len(scores)-successful)/len(scores):.1f}%)")
     
-    print(f"\n{Fore.GREEN}Matched Top-1 Performance:{Style.RESET_ALL}")
-    print(f"  MSE: {matched_mse:.4f}")
-    print(f"  MAE: {matched_mae:.4f}")
-    print(f"  Correlation: {matched_corr:.4f}")
-    print(f"  Mean Actual Grade: {matched_actual.mean():.3f}")
-    print(f"  Mean Predicted Score: {matched_predicted.mean():.3f}")
-    
-    # Save data for R visualization
-    import pandas as pd
-    
-    # Prepare data for R
-    # Create a long-format dataframe for easier plotting in R
-    data_for_r = []
-    
-    # Add GNN data
-    for grade in gnn_actual:
-        data_for_r.append({
-            'method': 'GNN_Top1',
-            'actual_grade': grade
-        })
-    
-    # Add Matched data
-    for grade in matched_actual:
-        data_for_r.append({
-            'method': 'Matched_Top1', 
-            'actual_grade': grade
-        })
-    
-    # Create DataFrame and save as CSV
-    df = pd.DataFrame(data_for_r)
-    df.to_csv('top1_grades_data.csv', index=False)
-    
-    # Also save summary statistics
+    # Save summary statistics
     summary_stats = {
-        'method': ['GNN_Top1', 'Matched_Top1'],
-        'mean': [gnn_actual.mean(), matched_actual.mean()],
-        'median': [np.median(gnn_actual), np.median(matched_actual)],
-        'std': [gnn_actual.std(), matched_actual.std()],
-        'min': [gnn_actual.min(), matched_actual.min()],
-        'max': [gnn_actual.max(), matched_actual.max()],
-        'q25': [np.percentile(gnn_actual, 25), np.percentile(matched_actual, 25)],
-        'q75': [np.percentile(gnn_actual, 75), np.percentile(matched_actual, 75)],
-        'sample_size': [len(gnn_actual), len(matched_actual)]
+        'metric': ['mean', 'median', 'std', 'min', 'max', 'q25', 'q75', 'success_rate', 'sample_size'],
+        'value': [
+            scores.mean(),
+            np.median(scores),
+            scores.std(),
+            scores.min(),
+            scores.max(),
+            np.percentile(scores, 25),
+            np.percentile(scores, 75),
+            successful/len(scores),
+            len(scores)
+        ]
     }
     
     summary_df = pd.DataFrame(summary_stats)
-    summary_df.to_csv('top1_grades_summary.csv', index=False)
-    
-    print(f"\n{Fore.CYAN}Data saved to:{Style.RESET_ALL}")
-    print(f"  - top1_grades_data.csv (raw data for plotting)")
-    print(f"  - top1_grades_summary.csv (summary statistics)")
-    print(f"\n{Fore.GREEN}Sample sizes:{Style.RESET_ALL}")
-    print(f"  - GNN Top-1: {len(gnn_actual)} questions")
-    print(f"  - Matched Top-1: {len(matched_actual)} questions")
+    summary_file = 'agentcard_matching_summary.csv'
+    summary_df.to_csv(summary_file, index=False)
+    print(f"{Fore.CYAN}Summary statistics saved to:{Style.RESET_ALL} {summary_file}")
+
+if __name__ == '__main__':
+    evaluate_agent_card_matching()

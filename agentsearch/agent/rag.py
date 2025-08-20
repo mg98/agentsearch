@@ -6,7 +6,7 @@ from langchain_chroma import Chroma
 from langchain_core.documents import Document
 from agentsearch.utils.globals import db_location, embeddings
 
-def retrieve(agent_id: int, query: str, k: int = 10000) -> list[Document]:
+def retrieve(agent_id: int, query: str, k: int = 100) -> list[Document]:
     vector_store = Chroma(
         collection_name=f"agent_{agent_id}",
         persist_directory=db_location,

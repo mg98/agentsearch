@@ -4,6 +4,7 @@ from torch_geometric.nn import GATv2Conv
 from torch_geometric.data import Data, Batch
 from agentsearch.utils.globals import EMBEDDING_DIM
 from agentsearch.dataset.agents import Agent
+from agentsearch.dataset.questions import Question
 import random
 import numpy as np
 from typing import List, Tuple
@@ -167,7 +168,7 @@ class GraphData(Data):
         
         return transitive_features
 
-    def add_edge(self, source_agent: Agent, target_agent: Agent, question_embedding: np.ndarray, grade: float):
+    def add_edge(self, source_agent: Agent, target_agent: Agent, question: Question, trust_score: float):
         """Add an edge with trust score and question embedding"""
         source_idx = self.agent_id_to_index[source_agent.id]
         target_idx = self.agent_id_to_index[target_agent.id]
@@ -176,83 +177,18 @@ class GraphData(Data):
         self.edge_index = torch.cat([self.edge_index, new_edge], dim=1)
 
         edge_attr = torch.cat([
-            torch.tensor(question_embedding).float().unsqueeze(0)
+            torch.tensor(question.embedding).float().unsqueeze(0)
         ], dim=1)
         self.edge_attributes = torch.cat([self.edge_attributes, edge_attr], dim=0)
         
         # Store trust score for structural feature computation
-        self.trust_scores = torch.cat([self.trust_scores, torch.tensor([grade], dtype=torch.float)], dim=0)
-    
-    def normalize_trust_scores(self):
-        """Normalize trust scores to [0, 1] range using logarithmic scaling"""
-        if len(self.trust_scores) == 0:
-            return
-        
-        self.trust_min = self.trust_scores.min().item()
-        self.trust_max = self.trust_scores.max().item()
-        
-        # Store original values before normalization for evaluation
-        self.original_trust_min = self.trust_min
-        self.original_trust_max = self.trust_max
-        
-        # Avoid division by zero or log(0)
-        if self.trust_max == self.trust_min:
-            self.trust_scores = torch.ones_like(self.trust_scores) * 0.5
-            # Update edge attributes as well
-            self.edge_attributes[:, -1] = 0.5
-        else:
-            # Apply log(1 + x) transformation and normalize to [0, 1]
-            log_scores = torch.log1p(self.trust_scores)
-            log_min = torch.log1p(torch.tensor(self.trust_min))
-            log_max = torch.log1p(torch.tensor(self.trust_max))
-            
-            # Normalize log scores to [0, 1]
-            self.trust_scores = (log_scores - log_min) / (log_max - log_min)
-            # Update edge attributes as well
-            self.edge_attributes[:, -1] = self.trust_scores
-        
-        print(f"Normalized trust scores: min={self.trust_min}, max={self.trust_max}")
-    
-    def denormalize_trust_score(self, normalized_score: float) -> float:
-        """Convert normalized score back to original scale using exponential"""
-        if self.trust_min is None or self.trust_max is None:
-            return normalized_score
-        
-        if self.trust_max == self.trust_min:
-            return self.trust_min
-        
-        # Convert back from [0,1] to log space
-        log_min = math.log1p(self.trust_min)
-        log_max = math.log1p(self.trust_max)
-        log_score = normalized_score * (log_max - log_min) + log_min
-        
-        # Convert from log space back to original scale
-        return math.expm1(log_score)
-    
-    def normalize_single_score(self, raw_score: float) -> float:
-        """Normalize a single raw score using the same logic as normalize_trust_scores"""
-        if self.original_trust_min is None or self.original_trust_max is None:
-            return raw_score
-        
-        if self.original_trust_max == self.original_trust_min:
-            return 0.5
-        
-        # Apply log(1 + x) transformation and normalize to [0, 1]
-        log_raw = math.log1p(raw_score)
-        log_min = math.log1p(self.original_trust_min)
-        log_max = math.log1p(self.original_trust_max)
-        
-        # Normalize log score to [0, 1]
-        normalized = (log_raw - log_min) / (log_max - log_min)
-        return normalized
+        self.trust_scores = torch.cat([self.trust_scores, torch.tensor([trust_score], dtype=torch.float)], dim=0)
     
     def finalize_features(self):
         """
         Normalize trust scores and compute degree, trust, PageRank, and transitive trust features 
         after all edges have been added. Enhanced with transitive trust patterns for 2-hop topology.
         """
-        # First normalize trust scores
-        self.normalize_trust_scores()
         
         if self.edge_index.size(1) == 0:
             return  # No edges, keep zero degree features
@@ -277,7 +213,7 @@ class GraphData(Data):
             in_degree = len(in_edges)
             out_degree = len(out_edges)
             
-            # Average trust scores (now normalized)
+            # Average trust scores
             avg_in_trust = self.trust_scores[in_edges].mean().item() if in_degree > 0 else 0.0
             avg_out_trust = self.trust_scores[out_edges].mean().item() if out_degree > 0 else 0.0
             
@@ -329,6 +265,47 @@ class GraphData(Data):
             data.prediction_target_ids = data.edge_index[1]
         
         return train_data, val_data
+    
+
+    def apply_adversarial_attack(self, attack_vol: float):
+        """
+        Apply adversarial attack to a graph by flipping trust scores for a portion of agents.
+        
+        Args:
+            graph: The base GraphData object with honest trust scores
+            attack_vol: Float between 0 and 1 indicating the fraction of agents to make adversarial
+        """
+        core_agent_idx = 0
+        
+        # Find direct target agents by looking at edges from core agent
+        direct_target_indices = set()
+        for edge_idx in range(self.edge_index.size(1)):
+            source_idx = self.edge_index[0, edge_idx].item()
+            target_idx = self.edge_index[1, edge_idx].item()
+            if source_idx == core_agent_idx:
+                direct_target_indices.add(target_idx)
+        
+        # Also find agents that have edges TO any node (i.e., agents that asked questions)
+        # These are the agents that could be adversarial
+        agents_with_outgoing_edges = set()
+        for edge_idx in range(self.edge_index.size(1)):
+            source_idx = self.edge_index[0, edge_idx].item()
+            if source_idx != core_agent_idx:
+                agents_with_outgoing_edges.add(source_idx)
+        
+        # The agents that can be adversarial are those in direct_target_indices 
+        # that also have outgoing edges
+        potential_adversarial = sorted(list(direct_target_indices & agents_with_outgoing_edges))
+        
+        # Determine which agents are adversarial
+        num_adversarial = int(attack_vol * len(potential_adversarial))
+        adversarial_agent_indices = set(potential_adversarial[:num_adversarial])
+        
+        # Iterate through all edges and flip trust scores from adversarial agents
+        for edge_idx in range(self.edge_index.size(1)):
+            source_idx = self.edge_index[0, edge_idx].item()
+            if source_idx in adversarial_agent_indices:
+                self.trust_scores[edge_idx] = 1 - self.trust_scores[edge_idx]
 
 
 class TrustGNN(torch.nn.Module):

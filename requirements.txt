@@ -5,6 +5,7 @@ nltk
 langchain
 langchain-ollama
 langchain-openai
+langchain-google-genai
 langchain-chroma
 langchain-nomic
 langchain-text-splitters
@@ -21,3 +22,5 @@ colorama
 matplotlib
 networkx
 wandb
+google-genai
+tiktoken
