@@ -6,12 +6,6 @@ from agentsearch.dataset.agents import Agent
 from dataclasses import dataclass
 from agentsearch.dataset.questions import Question
 
-def compute_trust_score(num_sources: int) -> float:
-    max_sources = 100
-    if num_sources > max_sources:
-        num_sources = max_sources
-    return np.log(num_sources + 1) / np.log(max_sources + 1)
-
 def visualize_graph(data: GraphData, title="Graph Visualization", hide_isolated_nodes=True, output_file="graph.html"):
     """Visualizes the graph with edge colors based on trust score using pyvis."""
     
