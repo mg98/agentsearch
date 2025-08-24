@@ -19,7 +19,7 @@ else:
     warnings.warn("no papers/pdf directory found")
 agents_df['research_fields'] = agents_df['research_fields'].apply(literal_eval)
 agents_df = agents_df[agents_df['research_fields'].apply(len) > 0]
-agents_df = agents_df.sample(frac=1)
+agents_df = agents_df.sample(frac=1, random_state=42)
 
 # Load LLM-generated agent cards
 agentcards_df = pd.read_csv('data/agentcards.csv', index_col=0)
