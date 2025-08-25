@@ -85,10 +85,10 @@ if __name__ == "__main__":
         question_text = questions_df.loc[qid, 'question']
         test_questions.append((qid, question_text))
     
-    for attack_volume in range(100, 101, 10):
+    for attack_volume in range(0, 101, 10):
         graph_data = pd.read_csv(f"data/graph_{attack_volume}.csv", 
                                  dtype={'source_agent': int, 'target_agent': int, 'question': int, 'score': float})
-        data = []
+        data: list[Data] = []
         for _, row in graph_data.iterrows():
             question_text = questions_df.loc[row['question'], 'question']
             agent_id = row['target_agent']
