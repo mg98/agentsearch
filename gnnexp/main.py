@@ -1,16 +1,21 @@
 import os
 import sys
 import yaml
-import pickle
 import logging
 import re
+import torch
 from torch_geometric.data import Data
 
 # Add current directory to path for imports
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 
-from data_utils import prepare_data, set_seed
+from gnnexp.data_utils import prepare_data, set_seed
 from gnnexp.training import setup_model_and_training, train_model
+
+import pandas as pd
+
+import torch
+from torch_geometric.data import Data
 
 
 def convert_scientific_notation(obj):
@@ -44,28 +49,51 @@ def load_config(config_path):
     return config
 
 
-def load_graph_data(data_path):
-    """Load graph data from pickle file"""
-    with open(data_path, 'rb') as f:
-        grph = pickle.load(f)['graph']
+def load_data(data_dir, percentage_lying: int=0):
+    """Load data from parquet files"""
+    avail_edge_files = os.listdir(os.path.join(data_dir, "graph"))
+    assert f"edges_{percentage_lying}.csv" in avail_edge_files
+
+    edge_df = pd.read_csv(os.path.join(data_dir, "graph", f"edges_{percentage_lying}.csv"))
+    edge_df['binary_score'] = edge_df['score'] > 0  # binary score can be derived from the score
     
-    # Create PyTorch Geometric Data object
-    graph_data = Data(
-        x=grph['x'], # shape [num_nodes, num_node_features]
-        edge_index=grph['edge_index'], # shape [2, num_edges]
-        edge_attr=grph['edge_attributes'][:, :-1], # shape [num_edges, num_edge_features]
-        y=grph['trust_scores'] # shape [num_edges, 1] for edge regression
+
+    questions_df = pd.read_parquet(os.path.join(data_dir, "questions.parquet")).set_index('id')
+    edge_df['question_emb'] = edge_df['question'].map(questions_df['embedding'])
+
+    agents_df = pd.read_parquet(os.path.join(data_dir, "agents.parquet")).set_index('id')
+    # add a zero embedding for agent id 0
+    agents_df.loc[0] = [torch.zeros(agents_df.iloc[0]['embedding'].shape[0]).numpy()]  # assuming all embeddings have the same shape
+
+    # check that all edge_df['source_agent'] and edge_df['target_agent'] are in agents_df.index
+    assert edge_df['source_agent'].isin(agents_df.index).all()
+    assert edge_df['target_agent'].isin(agents_df.index).all()
+
+    agent_ids = pd.Index(edge_df['source_agent'].tolist() + edge_df['target_agent'].tolist()).unique()
+    map_to_index = {agent_id: idx for idx, agent_id in enumerate(agent_ids)}
+    edge_df['source_agent'] = edge_df['source_agent'].map(map_to_index)
+    edge_df['target_agent'] = edge_df['target_agent'].map(map_to_index)
+
+    data = Data(
+        x = torch.stack(
+            [
+                torch.tensor(agents_df.loc[agent_id]['embedding']).float() for agent_id in agent_ids
+            ]
+        ),
+        edge_index = torch.tensor( edge_df[['source_agent', 'target_agent']].astype(int).values.T),
+        edge_attr = torch.stack([torch.tensor(t).float() for t in edge_df['question_emb'].values.tolist()]),
+        y = torch.tensor(edge_df['binary_score'].values.astype(float).tolist())
     )
-    
-    return graph_data
+
+    return data    
 
 
 def main():
     """Main training function"""
     
     # Paths
+    # TODO make --cfg
     config_path = "./configs/config.yaml"
-    data_path = "./data/graph.pkl"
     
     # Load configuration
     print("Loading configuration...")
@@ -76,12 +104,12 @@ def main():
     
     # Load data
     print("Loading graph data...")
-    graph_data = load_graph_data(data_path)
+    graph_data = load_data(config['data']['root'], percentage_lying=config['data']['percentage_lying'])
     
     print(f"Graph statistics:")
-    print(f"  Nodes: {graph_data.x.size(0)}")
+    print(f"  Nodes: {graph_data.x.size(0)}, embedding size {graph_data.x.size(1)}")
     print(f"  Edges: {graph_data.edge_index.size(1)}")
-    print(f"  Node features: {graph_data.x.size(1)}")
+    print(f"  Node features: {graph_data.x.size(1)}") 
     print(f"  Edge features: {graph_data.edge_attr.size(1)}")
     
     # Prepare data (splits and normalization)
@@ -107,7 +135,6 @@ def main():
     print(f"  Loss: {test_metrics['loss']:.6f}")
     print(f"  MAE:  {test_metrics['mae']:.6f}")
     print(f"  RMSE: {test_metrics['rmse']:.6f}")
-    print(f"  Correlation: {test_metrics['correlation']:.6f}")
     print("="*50)
 
 

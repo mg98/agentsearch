@@ -1,25 +1,26 @@
 model:
-  node_embedding_dim: 64
-  edge_embedding_dim: 64
-  hidden_dim: 64
-  num_layers: 1
+  node_embedding_dim: 16
+  edge_embedding_dim: 16
+  hidden_dim: 16
+  num_layers: 2
   dropout: 0.1
   activation: "relu"
 
 training:
   batchsize: 1024
   epochs: 500
-  learning_rate: 0.001
+  learning_rate: 0.002
   weight_decay: 1e-5
-  patience: 20
+  patience: 10
   min_delta: 1e-4
 
 data:
+  root: "/mnt/lourens/data/agentsearch/data"
+  percentage_lying: 0
   train_ratio: 0.6
   val_ratio: 0.2
   test_ratio: 0.2
-  log_normalize: true
-
+  
 experiment:
   seed: 42
   device: "cuda"

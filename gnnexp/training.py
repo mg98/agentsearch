@@ -1,13 +1,16 @@
+from gnnexp.models import HeadlessEdgeRegressionModel, EdgePredictionHead
+from gnnexp.data_utils import set_seed
+
 import torch
 import torch.nn as nn
 import torch.optim as optim
+
 import numpy as np
 import wandb
+from tqdm import tqdm
+
 import logging
 import os
-from tqdm import tqdm
-from gnnexp.models import HeadlessEdgeRegressionModel, EdgePredictionHead
-from data_utils import set_seed
 
 
 def compute_metrics(predictions, targets):
@@ -16,15 +19,6 @@ def compute_metrics(predictions, targets):
         mse = nn.MSELoss()(predictions, targets)
         mae = nn.L1Loss()(predictions, targets)
         
-        # Pearson correlation coefficient
-        pred_mean = predictions.mean()
-        target_mean = targets.mean()
-        pred_centered = predictions - pred_mean
-        target_centered = targets - target_mean
-        
-        numerator = (pred_centered * target_centered).sum()
-        denominator = torch.sqrt((pred_centered ** 2).sum() * (target_centered ** 2).sum())
-        correlation = numerator / (denominator + 1e-8)
         
         # R2 score
         ss_res = ((targets - predictions) ** 2).sum()
@@ -35,7 +29,6 @@ def compute_metrics(predictions, targets):
             'mse': mse.item(),
             'mae': mae.item(),
             'rmse': torch.sqrt(mse).item(),
-            'correlation': correlation.item(),
             'r2': r2.item()
         }
 
@@ -73,20 +66,22 @@ def train_epoch(model, head, data, split_dict, optimizer, criterion, device, bat
 
         # TODO we should probably put the head in a model
         # Forward pass with all train_edges (including labels!) except for the current batch
-        node_embeddings, _ = model(
-            data.x,
+        # Ensure consistent dtype (avoid Double vs Float mismatch)
+        model_dtype = next(model.parameters()).dtype
+        edge_attributes_with_label = torch.cat((
+            data.edge_attr[inclusive_mask].to(model_dtype),      # take all edge attributes except the current batch
+            data.y[inclusive_mask].unsqueeze(1).to(model_dtype)),  # and add the trust score label
+            dim=1
+        )
+
+        node_embeddings, edge_embeddings = model(
+            data.x.to(model_dtype),
             data.edge_index[:, inclusive_mask],  # take all edges except the current batch
-            torch.cat((
-                data.edge_attr[inclusive_mask],      # take all edge attributes except the current batch
-                data.y[inclusive_mask].unsqueeze(1)),  # and add the trust score label
-                dim=1
-            )
+            edge_attributes_with_label
         )
 
         # Add the head
-        # TODO do we need an embedding model for the edges?
-        train_predictions = head(node_embeddings, data.edge_attr[batch_mask], data.edge_index[:, batch_mask])
-        train_predictions = train_predictions.squeeze(1)
+        train_predictions = head(node_embeddings, data.edge_attr[batch_mask].to(model_dtype), data.edge_index[:, batch_mask])
 
         # Get the targets for the current batch
         train_targets = data.y[batch_mask]
@@ -100,6 +95,7 @@ def train_epoch(model, head, data, split_dict, optimizer, criterion, device, bat
         all_preds[i:i + batchsize] = train_predictions
         epoch_loss += loss.item()
 
+
     # after the epoch is done, we step the optimizer
     optimizer.step()
     
@@ -107,7 +103,6 @@ def train_epoch(model, head, data, split_dict, optimizer, criterion, device, bat
     metrics = compute_metrics(all_preds, all_tgts)
     metrics['loss'] = epoch_loss / len(shuffled_indices)
     metrics['LR'] = optimizer.param_groups[0]['lr']
-
 
     return metrics
 
@@ -129,7 +124,7 @@ def evaluate(model, head, data, split_dict, criterion, device, split='val'):
 
         assert (inclusive_mask & target_mask).sum() == 0, "The inclusive mask and target mask should not overlap."
 
-        node_embeddings, _ = model(
+        node_embeddings, edge_embeddings = model(
             data.x, 
             data.edge_index[:, inclusive_mask], 
             torch.cat(
@@ -140,7 +135,6 @@ def evaluate(model, head, data, split_dict, criterion, device, split='val'):
         )
 
         split_predictions = head(node_embeddings, data.edge_attr[target_mask], data.edge_index[:, target_mask])
-        split_predictions = split_predictions.squeeze(1)
         split_targets = data.y[target_mask]
 
         loss = criterion(split_predictions, split_targets)
@@ -148,7 +142,6 @@ def evaluate(model, head, data, split_dict, criterion, device, split='val'):
         # Compute metrics
         metrics = compute_metrics(split_predictions, split_targets)
         metrics['loss'] = loss.item()
-
 
         return metrics
 
@@ -190,8 +183,7 @@ def train_model(model, head, data, split_dict, config, device):
             logging.info(f"Epoch {epoch:3d} | "
                         f"Train Loss: {train_metrics['loss']:.4f} | "
                         f"Val Loss: {val_metrics['loss']:.4f} | "
-                        f"Val RMSE: {val_metrics['rmse']:.4f} | "
-                        f"Val Corr: {val_metrics['correlation']:.4f}")
+                        f"Val RMSE: {val_metrics['rmse']:.4f} | ")
         
         # Log to wandb
         wandb.log({
@@ -217,7 +209,6 @@ def train_model(model, head, data, split_dict, config, device):
     logging.info(f"  Test Loss: {test_metrics['loss']:.4f}")
     logging.info(f"  Test MAE: {test_metrics['mae']:.4f}")
     logging.info(f"  Test RMSE: {test_metrics['rmse']:.4f}")
-    logging.info(f"  Test Correlation: {test_metrics['correlation']:.4f}")
     
     # Log final test metrics to wandb
     wandb.log({
@@ -231,10 +222,6 @@ def train_model(model, head, data, split_dict, config, device):
 
 def setup_model_and_training(graph_data, config):
     """Setup model and prepare for training"""
-    
-    # Set seed for reproducibility
-    set_seed(config['experiment']['seed'])
-    
     # Setup logging
     logging.basicConfig(
         level=getattr(logging, config['logging']['log_level']),
@@ -245,7 +232,13 @@ def setup_model_and_training(graph_data, config):
     
     # Initialize model
     # the + 1 is for the trust score label
-    model = HeadlessEdgeRegressionModel(node_input_dim, edge_input_dim + 1, config)
+    model = HeadlessEdgeRegressionModel(
+        node_input_dim, 
+        edge_input_dim + 1,  # + 1 because we use label here
+        config
+    )
+
+    # TODO should target edge also have an embedder?
     head = EdgePredictionHead(
         node_dim=config['model']['hidden_dim'],
         edge_dim=edge_input_dim,
