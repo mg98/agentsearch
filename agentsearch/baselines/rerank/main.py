@@ -4,7 +4,7 @@ from agentsearch.dataset.agents import agents_df, Agent, AgentStore
 from sklearn.model_selection import train_test_split
 from tqdm import tqdm
 import numpy as np
-from agentsearch.baselines.bhopale.reranker import BERTCrossEncoderReranker, fine_tune_reranker
+from agentsearch.baselines.rerank.reranker import BERTCrossEncoderReranker, fine_tune_reranker
 
 Data = list[str, str, float] # Question text, agent card, score
 

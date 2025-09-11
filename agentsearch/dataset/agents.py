@@ -4,13 +4,14 @@ from chromadb.api.types import QueryResult
 import pandas as pd
 from ast import literal_eval
 import os
-from agentsearch.agent.rag import retrieve
+from agentsearch.agent.rag import retrieve, retrieve_with_embedding
 from agentsearch.agent import qa
 from agentsearch.dataset.questions import questions_store
 import numpy as np
 from agentsearch.dataset.papers import Paper
 from agentsearch.utils.globals import db_location, embeddings
 import warnings
+from agentsearch.dataset.questions import Question
 
 agents_df = pd.read_csv('data/agents.csv', index_col=0)
 if os.path.exists("papers/pdf"):
@@ -84,6 +85,10 @@ class Agent:
     def has_sources(self, question: str) -> bool:
         sources = retrieve(self.id, question, k=1)
         return len(sources) > 0
+    
+    def get_confidence(self, question: Question) -> float:
+        sources = retrieve_with_embedding(self.id, question.embedding, k=100)
+        return np.log(len(sources) + 1) / np.log(101)
 
 @dataclass
 class AgentMatch:

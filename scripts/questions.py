@@ -5,7 +5,7 @@ from datetime import datetime
 from openai import OpenAI
 from pydantic import BaseModel, Field
 import pandas as pd
-from agentsearch.dataset.agents import Agent
+from agentsearch.dataset.agents import Agent, AgentStore
 from typing import List
 
 
@@ -18,9 +18,9 @@ class QuestionList(BaseModel):
     questions: List[str] = Field(None, title="Questions")
 
 question_template = """
-You are a scientist at Delft University of Technology and an expert in the following domains: {expertise}.
+You are a scientist and expert in the following domains: {expertise}.
 
-Generate 10 questions that an expert in these domains would be able to answer.
+Generate 10 questions in English language that an expert in these domains would be able to answer.
 Do not enumerate the questions, just list them.
 """
 
@@ -34,12 +34,12 @@ def create_batch_file(agents: list[Agent], filename="data/batch_questions.jsonl"
             "method": "POST",
             "url": "/v1/chat/completions",
             "body": {
-                "model": "gpt-4o",
+                "model": "gpt-5-mini",
                 "messages": [
                     {
                         "role": "user",
                         "content": question_template.format(
-                            expertise=", ".join(agent.research_fields)
+                            expertise=agent.agent_card
                         )
                     }
                 ],
@@ -61,8 +61,8 @@ def create_batch_file(agents: list[Agent], filename="data/batch_questions.jsonl"
                         }
                     }
                 },
-                "temperature": 0.6,
-                "max_tokens": 1000
+                # "temperature": 0.6,
+                # "max_tokens": 1000
             }
         }
         tasks.append(task)
@@ -114,7 +114,7 @@ def monitor_batch_job(batch_id):
         timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         print(f"[{timestamp}] Batch Status: {status}")
         
-        if status == "failed":
+        if status == "failed" or status == "cancelled":
             print("Batch job failed!")
             if batch_response.errors:
                 for error in batch_response.errors.data:
@@ -200,7 +200,8 @@ def main():
     """Main function to orchestrate the batch processing"""
     print("Starting batch question generation...")
     
-    agents = Agent.all()
+    agent_store = AgentStore(use_llm_agent_card=False)
+    agents = agent_store.all(shallow=True)
     batch_filename = create_batch_file(agents)
     
     try:

@@ -5,6 +5,7 @@ from io import StringIO
 from langchain_chroma import Chroma
 from langchain_core.documents import Document
 from agentsearch.utils.globals import db_location, embeddings
+import numpy as np
 
 def retrieve(agent_id: int, query: str, k: int = 100) -> list[Document]:
     vector_store = Chroma(
@@ -21,3 +22,32 @@ def retrieve(agent_id: int, query: str, k: int = 100) -> list[Document]:
     # Suppress all output from retriever.invoke
     with redirect_stdout(StringIO()), redirect_stderr(StringIO()):
         return retriever.invoke(query)
+    
+def retrieve_with_embedding(agent_id: int, query_embedding: np.ndarray, k: int = 100) -> list[Document]:
+    vector_store = Chroma(
+        collection_name=f"agent_{agent_id}",
+        persist_directory=db_location,
+        embedding_function=embeddings
+    )
+
+    # Query directly with embedding using the collection
+    print(f"QUERYING")
+    search_results = vector_store._collection.query(
+        query_embeddings=[query_embedding.tolist()],
+        n_results=k,
+        include=['documents', 'metadatas', 'distances']
+    )
+    print(f"QUERYING DONE")
+    
+    # Convert results to Document objects
+    documents = []
+    if search_results['documents'] is not None and search_results['documents'][0]:
+        for i, doc_content in enumerate(search_results['documents'][0]):
+            distance = search_results['distances'][0][i]
+            similarity_score = 1 - distance
+            
+            if similarity_score >= 0.5:
+                metadata = search_results['metadatas'][0][i] if search_results['metadatas'] else {}
+                documents.append(Document(page_content=doc_content, metadata=metadata))
+    
+    return documents

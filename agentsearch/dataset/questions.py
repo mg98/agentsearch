@@ -20,26 +20,27 @@ class Question:
     embedding: np.ndarray
 
     @classmethod
-    def from_id(cls, id: int) -> 'Question':
+    def from_id(cls, id: int, shallow: bool = False) -> 'Question':
         question = cls(
             id=id,
             agent_id=int(questions_df.loc[id, 'agent_id']),
             question=questions_df.loc[id, 'question'],
             embedding=None
         )
-        question.load_embedding()
+        if not shallow:
+            question.load_embedding()
         return question
     
     @classmethod
-    def all(cls, from_agents: list[int] | None = None, questions_per_agent: int = 100) -> list['Question']:
+    def all(cls, from_agents: list[int] | None = None, questions_per_agent: int = 100, shallow: bool = False) -> list['Question']:
         if from_agents is None:
-            return [cls.from_id(idx) for idx in questions_df.index]
+            return [cls.from_id(idx, shallow) for idx in questions_df.index]
         
         questions = []
         for agent_id in from_agents:
             agent_questions = questions_df[questions_df['agent_id'] == agent_id]
             for idx in agent_questions.index[:questions_per_agent]:
-                question = cls.from_id(idx)
+                question = cls.from_id(idx, shallow)
                 questions.append(question)
         return questions
     

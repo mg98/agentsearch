@@ -2,6 +2,7 @@ torch
 torch-geometric
 numpy
 nltk
+sentence-transformers
 langchain
 langchain-ollama
 langchain-openai
@@ -9,6 +10,7 @@ langchain-google-genai
 langchain-chroma
 langchain-nomic
 langchain-text-splitters
+langchain-huggingface
 lxml
 bs4
 deepeval
@@ -23,3 +25,4 @@ matplotlib
 networkx
 google-genai
 tiktoken
+rank-bm25

@@ -1,12 +1,9 @@
 import random
-import pickle
 import numpy as np
 from colorama import init, Fore, Style
 from agentsearch.dataset.agents import Agent, AgentStore
 from agentsearch.dataset.questions import Question
-from agentsearch.dataset import agents
-from agentsearch.graph.types import GraphData, TrustGNN
-from agentsearch.graph.utils import visualize_graph, Interaction
+from agentsearch.graph.utils import  Interaction
 from tqdm import tqdm
 import pandas as pd
 
@@ -28,10 +25,10 @@ def simulate_interactions(
         matches = agent_store.match_by_qid(question.id, K_MATCHES)
         assert len(matches) == K_MATCHES
         for match in matches:
-            trust_score = int(match.agent.has_sources(question.question))
+            trust_score = match.agent.get_confidence(question.question)
             print(f"Core agent asked {match.agent.name}: {trust_score}")
             edges.append(Interaction(Agent.make_dummy(), match.agent, question, trust_score))
-            if trust_score == 1:
+            if trust_score > 0:
                 break
 
     num_adversarial = int(len(observed_agents_with_questions) * attack_vol)
@@ -42,10 +39,10 @@ def simulate_interactions(
                 
             matches = agent_store.match_by_qid(question.id, K_MATCHES)
             for match in matches:
-                trust_score = random.randint(0, 1)
+                trust_score = 0 if random.random() < 0.5 else random.random()
                 print(f"{agent.name} asked {match.agent.name}: {trust_score}")
                 edges.append(Interaction(agent, match.agent, question, trust_score))
-                if trust_score == 1:
+                if trust_score > 0:
                     break
 
     for agent, questions in tqdm(observed_agents_with_questions[num_adversarial:], desc="Observed benign agents asking questions"):
@@ -54,10 +51,10 @@ def simulate_interactions(
                 
             matches = agent_store.match_by_qid(question.id, K_MATCHES)
             for match in matches:
-                trust_score = int(match.agent.has_sources(question.question))
+                trust_score = match.agent.get_confidence(question.question)
                 print(f"{agent.name} asked {match.agent.name}: {trust_score}")
                 edges.append(Interaction(agent, match.agent, question, trust_score))
-                if trust_score == 1:
+                if trust_score > 0:
                     break
 
     return edges
@@ -71,9 +68,9 @@ if __name__ == '__main__':
     all_questions = Question.all()
     random.shuffle(all_questions)
 
-    test_questions = all_questions[:100]
-    core_agent_questions = all_questions[100:200]
-    observed_agent_questions = all_questions[200:]
+    test_questions = all_questions[:1000]
+    core_agent_questions = all_questions[1000:1100]
+    observed_agent_questions = all_questions[1100:]
 
     weights = np.random.random(len(observed_agents))
     weights = weights / weights.sum() # normalize to sum to 1
@@ -94,7 +91,6 @@ if __name__ == '__main__':
     print(f"{Fore.CYAN}Wrote {len(test_qids)} test question IDs to data/test_qids.txt{Style.RESET_ALL}")
 
 
-
     for attack_vol in np.arange(0.0, 1.1, 0.1):
         edges = simulate_interactions(agent_store, core_agent_questions, observed_agents_with_questions, attack_vol)
         random.shuffle(edges)
@@ -108,6 +104,6 @@ if __name__ == '__main__':
             }
             for edge in edges
         ])
-        edges_df.to_csv(f'data/graph_{int(attack_vol*100)}.csv', index=False)
+        edges_df.to_csv(f'data/graph/edges_{int(attack_vol*100)}.csv', index=False)
 
     print(f"\n{Fore.GREEN}Saved graph data.{Style.RESET_ALL}")
