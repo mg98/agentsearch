@@ -1,6 +1,7 @@
 import requests
 
 db_location = "./chroma_db"
+EMBEDDING_DIM = 768
 
 def is_ollama_available():
     try:
@@ -21,5 +22,3 @@ else:
         encode_kwargs={'normalize_embeddings': True}
     )
     print("Using HuggingFace embeddings")
-
-EMBEDDING_DIM = 768

@@ -14,7 +14,11 @@ from torch.utils.data import Dataset, DataLoader
 from torch.optim import AdamW
 from transformers import get_linear_schedule_with_warmup
 import torch.nn.functional as F
+from sklearn.model_selection import train_test_split
+from agentsearch.dataset.agents import AgentStore, Agent
+from agentsearch.dataset.questions import Question
 
+Data = list[str, str, float] # Question text, agent card, score
 BATCH_SIZE = 64
 
 @dataclass
@@ -25,7 +29,6 @@ class RerankResult:
     original_score: float
     cross_encoder_score: float
     
-
 class BERTCrossEncoderReranker:
     """
     Re-ranks agent matches using a BERT cross-encoder model that evaluates
@@ -91,8 +94,7 @@ class BERTCrossEncoderReranker:
             
         return np.array(scores)
     
-    def rerank(self, query: str, agent_matches: list, top_k: int = None, 
-               show_progress: bool = False) -> list[RerankResult]:
+    def rerank(self, query: str, agent_matches: list, top_k: int = None) -> list[RerankResult]:
         """
         Re-rank agent matches using cross-encoder scoring.
         
@@ -100,7 +102,6 @@ class BERTCrossEncoderReranker:
             query: The question text
             agent_matches: List of AgentMatch objects from initial retrieval
             top_k: Return only top-k results after re-ranking (None = return all)
-            show_progress: Show progress bar during re-ranking
             
         Returns:
             List of RerankResult objects sorted by cross-encoder score
@@ -108,13 +109,7 @@ class BERTCrossEncoderReranker:
         if len(agent_matches) == 0:
             return []
             
-        # Extract agent cards for scoring
         documents = [match.agent.agent_card for match in agent_matches]
-        
-        # Score all pairs
-        if show_progress:
-            print(f"Re-ranking {len(documents)} agents with cross-encoder...")
-        
         scores = self.score_pairs(query, documents)
         
         # Create re-rank results
@@ -136,38 +131,19 @@ class BERTCrossEncoderReranker:
             
         return results
     
-    def rerank_with_agents(self, query: str, agent_matches: list, top_k: int = None,
-                           show_progress: bool = False) -> list:
+    def rerank_with_agents(self, query: str, agent_matches: list) -> list[Agent]:
         """
         Re-rank and return agent matches with updated scores.
         
         Args:
             query: The question text
             agent_matches: List of AgentMatch objects from initial retrieval
-            top_k: Return only top-k results after re-ranking
-            show_progress: Show progress bar during re-ranking
             
         Returns:
-            List of AgentMatch objects with cross-encoder scores, sorted by relevance
+            List of Agent ordered by cross-encoder score (descending)
         """
-        rerank_results = self.rerank(query, agent_matches, top_k, show_progress)
-        
-        # Create mapping from agent_id to original AgentMatch
-        id_to_match = {match.agent.id: match for match in agent_matches}
-        
-        # Return re-ordered AgentMatches with updated scores
-        reranked_matches = []
-        for result in rerank_results:
-            original_match = id_to_match[result.agent_id]
-            # Update the similarity score with cross-encoder score
-            from agentsearch.dataset.agents import AgentMatch
-            reranked_match = AgentMatch(
-                agent=original_match.agent,
-                similarity_score=result.cross_encoder_score
-            )
-            reranked_matches.append(reranked_match)
-            
-        return reranked_matches
+        rerank_results = self.rerank(query, agent_matches, top_k=8)
+        return list(map(lambda x: AgentStore.from_id(x.agent_id, shallow=True), rerank_results))
 
 
 class RerankingDataset(Dataset):
@@ -207,15 +183,7 @@ class RerankingDataset(Dataset):
         }
 
 
-def fine_tune_reranker(
-    train_data: list[tuple[str, str, float]], 
-    val_data: list[tuple[str, str, float]],
-    model_name: str = "cross-encoder/ms-marco-MiniLM-L-6-v2",
-    epochs: int = 5,
-    learning_rate: float = 2e-5,
-    warmup_steps: int = 100,
-    device: str = 'mps'
-) -> BERTCrossEncoderReranker:
+def create_trained_reranker(data: list[Data]) -> BERTCrossEncoderReranker:
     """
     Fine-tune a BERT cross-encoder model for re-ranking.
     
@@ -234,9 +202,12 @@ def fine_tune_reranker(
     Returns:
         Fine-tuned BERTCrossEncoderReranker model
     """
-    
-    device = torch.device(device)
-    print(f"Fine-tuning on device: {device}")
+    model_name = "cross-encoder/ms-marco-MiniLM-L-6-v2"
+    epochs = 5
+    learning_rate = 2e-5
+    warmup_steps = 100
+    device = torch.device('mps')
+    train_data, val_data = train_test_split(data, test_size=0.2, random_state=42)
     
     # Load pre-trained model and tokenizer
     tokenizer = AutoTokenizer.from_pretrained(model_name)
@@ -260,41 +231,29 @@ def fine_tune_reranker(
         num_training_steps=total_steps
     )
     
-    # Training loop
     model.train()
-    
     for epoch in range(epochs):
         print(f"\nEpoch {epoch + 1}/{epochs}")
-        
-        # Training phase
         train_loss = 0
         train_steps = 0
         
         progress_bar = tqdm(train_loader, desc="Training")
         for batch in progress_bar:
-            # Move batch to device
             input_ids = batch['input_ids'].to(device)
             attention_mask = batch['attention_mask'].to(device)
             labels = batch['labels'].to(device)
             
-            # Forward pass
             outputs = model(
                 input_ids=input_ids,
                 attention_mask=attention_mask
             )
             
             logits = outputs.logits.squeeze()
-            
-            # Calculate loss (MSE for regression or BCE for binary classification)
-            # Using MSE as the paper mentions scoring relevance
             loss = F.mse_loss(torch.sigmoid(logits), labels)
-            
-            # Backward pass
             optimizer.zero_grad()
             loss.backward()
             optimizer.step()
             scheduler.step()
-            
             train_loss += loss.item()
             train_steps += 1
             
@@ -312,15 +271,12 @@ def fine_tune_reranker(
                 input_ids = batch['input_ids'].to(device)
                 attention_mask = batch['attention_mask'].to(device)
                 labels = batch['labels'].to(device)
-                
                 outputs = model(
                     input_ids=input_ids,
                     attention_mask=attention_mask
                 )
-                
                 logits = outputs.logits.squeeze()
                 loss = F.mse_loss(torch.sigmoid(logits), labels)
-                
                 val_loss += loss.item()
                 val_steps += 1
         
@@ -338,3 +294,12 @@ def fine_tune_reranker(
     reranker.device = device
     
     return reranker
+
+def rerank_match(reranker: BERTCrossEncoderReranker, agent_store: AgentStore, question: Question) -> list[Agent]:
+    initial_matches = agent_store.match_by_qid(question.id, top_k=100)
+    reranked_agents = reranker.rerank_with_agents(
+        query=question.question,
+        agent_matches=initial_matches,
+        top_k=8
+    )
+    return reranked_agents

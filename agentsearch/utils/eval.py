@@ -1,0 +1,103 @@
+import pandas as pd
+from typing import Callable
+from agentsearch.dataset.questions import Question
+from agentsearch.dataset.agents import Agent, AgentStore, agents_df, num_sources_to_score
+import numpy as np
+from sklearn.metrics import ndcg_score
+from dataclasses import dataclass
+from tqdm import tqdm
+from langchain_chroma import Chroma
+from agentsearch.utils.globals import db_location, embeddings
+
+
+def load_data(edges_path: str) -> pd.DataFrame:
+    return pd.read_csv(edges_path, dtype={
+        'source_agent': int, 
+        'target_agent': int, 
+        'question': int, 
+        'score': float
+    })
+
+def load_all_attacks() -> list[tuple[int, pd.DataFrame]]:
+    data = []
+    for i in range(0, 101, 10):
+        data.append((i, load_data(f'data/graph/edges_{i}.csv')))
+    return data
+
+def load_test_questions() -> list[Question]:
+    with open('data/test_qids.txt', 'r') as f:
+        test_qids = [int(qid.strip()) for qid in f.read().split(',')]
+    return Question.many(test_qids, shallow=False)
+
+class Oracle:
+    def __init__(self):
+        self.matrix = np.load('data/test_matrix.npy')
+        with open('data/test_qids.txt', 'r') as f:
+            self.test_qids = [int(qid.strip()) for qid in f.read().split(',')]    
+
+    def match(self, agent_store: AgentStore, question: Question) -> list[Agent]:
+        question_scores = self.matrix[self.test_qids.index(question.id)]
+        top_agents = np.argsort(question_scores)[::-1][:8]
+        agent_ids = agents_df.iloc[top_agents].index.tolist()
+        return list(map(lambda id: agent_store.from_id(id, shallow=True), agent_ids))
+
+@dataclass
+class EvalMetrics:
+    precision_1: float
+    precision_3: float
+    rr_8: float
+    ndcg_8: float
+
+@dataclass
+class MatchResult:
+    rank: int # given by match_fn
+    agent: Agent
+    score: float # real score
+
+def compute_metrics(match_results: list[MatchResult]) -> EvalMetrics:
+    precision_1 = int(match_results[0].score > 0)
+    precision_3 = sum([int(score > 0) for score in match_results[:3]]) / 3
+    rr_8 = next((1 / (match_result.rank + 1) for match_result in match_results if match_result.score > 0), 0)
+    
+    y_pred = [8 - match_result.rank for match_result in match_results]
+    y_true = [match_result.score for match_result in match_results]
+    ndcg_8 = ndcg_score(y_true, y_pred, k=8)
+
+    return EvalMetrics(precision_1, precision_3, rr_8, ndcg_8)
+
+
+def compute_question_agent_matrix(questions: list[Question], agents: list[Agent]) -> np.ndarray:
+    matrix = np.zeros((len(questions), len(agents)))
+    for agent_idx, agent in enumerate(tqdm(agents, desc="Processing agents")):
+        vector_store = Chroma(
+            collection_name=f"agent_{agent.id}",
+            persist_directory=db_location,
+            embedding_function=embeddings
+        )
+        results = vector_store._collection.query(
+            query_embeddings=np.array([q.embedding for q in questions]),
+            n_results=1000,
+            include=['distances']
+        )
+
+        # Fill matrix with number of results for each question-agent pair
+        for question_idx in range(len(questions)):
+            # Filter results by similarity threshold (1 - distance >= 0.5)
+            distances = results['distances'][question_idx]
+            num_sources = sum(1 for distance in distances if (1 - distance) >= 0.5)
+            matrix[question_idx, agent_idx] = num_sources #num_sources_to_score(num_sources)
+            
+    return matrix
+
+def full_eval(match_fn: Callable[[Question], list[Agent]]):
+    for q in load_test_questions():
+
+        top_agents: list[Agent] = match_fn(q)
+        top_agents_scores: list[MatchResult] = []
+
+        for rank, top_agent in enumerate(top_agents):
+            score = top_agent.grade(q)
+            top_agents_scores.append(MatchResult(rank, top_agent, score))
+
+        
+    pass

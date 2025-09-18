@@ -25,7 +25,7 @@ def simulate_interactions(
         matches = agent_store.match_by_qid(question.id, K_MATCHES)
         assert len(matches) == K_MATCHES
         for match in matches:
-            trust_score = match.agent.get_confidence(question.question)
+            trust_score = match.agent.grade(question.question)
             print(f"Core agent asked {match.agent.name}: {trust_score}")
             edges.append(Interaction(Agent.make_dummy(), match.agent, question, trust_score))
             if trust_score > 0:
@@ -51,7 +51,7 @@ def simulate_interactions(
                 
             matches = agent_store.match_by_qid(question.id, K_MATCHES)
             for match in matches:
-                trust_score = match.agent.get_confidence(question.question)
+                trust_score = match.agent.grade(question.question)
                 print(f"{agent.name} asked {match.agent.name}: {trust_score}")
                 edges.append(Interaction(agent, match.agent, question, trust_score))
                 if trust_score > 0:

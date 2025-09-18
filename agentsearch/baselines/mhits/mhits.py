@@ -41,7 +41,7 @@ def calculate_mhits_scores(graph_df: pd.DataFrame,
     for agent_id in all_agent_ids:
         # Trust is based on incoming positive ratings (how others rate this agent)
         incoming_ratings = graph_df[graph_df['target_agent'] == agent_id]['score'].values
-        trust_averages[agent_id] = np.mean(incoming_ratings)
+        trust_averages[agent_id] = np.mean(incoming_ratings) if len(incoming_ratings) > 0: else 0.0
     
     # Iterative calculation
     for iteration in range(max_iterations):

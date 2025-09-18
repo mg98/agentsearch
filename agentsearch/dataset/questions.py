@@ -7,10 +7,10 @@ from chromadb.api.types import QueryResult
 
 questions_df = pd.read_csv('data/questions.csv', index_col=0)
 questions_store = Chroma(
-            collection_name='questions',
-            persist_directory=db_location,
-            embedding_function=embeddings
-        )
+    collection_name='questions',
+    persist_directory=db_location,
+    embedding_function=embeddings
+)
 
 @dataclass
 class Question:
@@ -30,6 +30,43 @@ class Question:
         if not shallow:
             question.load_embedding()
         return question
+
+    @classmethod
+    def many(cls, ids: list[int], shallow: bool = False) -> list['Question']:
+        questions = []
+        for id in ids:
+            question = cls(
+                id=id,
+                agent_id=int(questions_df.loc[id, 'agent_id']),
+                question=questions_df.loc[id, 'question'],
+                embedding=None
+            )
+            questions.append(question)
+
+        if not shallow:
+            # Load all embeddings in a single batch query
+            question_ids = [str(q.id) for q in questions]
+            if question_ids:
+                result = questions_store._collection.get(
+                    ids=question_ids,
+                    include=['embeddings']
+                )
+
+                # Create a mapping from ID to embedding
+                id_to_embedding = {}
+                for idx, q_id in enumerate(result['ids']):
+                    if idx < len(result['embeddings']):
+                        id_to_embedding[q_id] = result['embeddings'][idx]
+
+                # Assign embeddings to questions
+                for question in questions:
+                    str_id = str(question.id)
+                    if str_id in id_to_embedding:
+                        question.embedding = id_to_embedding[str_id]
+                    else:
+                        raise ValueError(f"No embedding found for question ID {question.id}")
+
+        return questions
     
     @classmethod
     def all(cls, from_agents: list[int] | None = None, questions_per_agent: int = 100, shallow: bool = False) -> list['Question']:

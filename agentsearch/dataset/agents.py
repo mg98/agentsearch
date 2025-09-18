@@ -26,6 +26,8 @@ agents_df = agents_df.sample(frac=1, random_state=42)
 agentcards_df = pd.read_csv('data/agentcards.csv', index_col=0)
 agentcards_df = agentcards_df.reindex(agents_df.index)
 
+def num_sources_to_score(num_sources: int) -> float:
+    return np.log(num_sources + 1) / np.log(101)
 
 @dataclass
 class Agent:
@@ -85,10 +87,10 @@ class Agent:
     def has_sources(self, question: str) -> bool:
         sources = retrieve(self.id, question, k=1)
         return len(sources) > 0
-    
-    def get_confidence(self, question: Question) -> float:
+
+    def grade(self, question: Question) -> float:
         sources = retrieve_with_embedding(self.id, question.embedding, k=100)
-        return np.log(len(sources) + 1) / np.log(101)
+        return num_sources_to_score(len(sources))
 
 @dataclass
 class AgentMatch:

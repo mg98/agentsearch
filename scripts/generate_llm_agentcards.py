@@ -7,6 +7,7 @@ from tqdm import tqdm
 import openai
 from openai import OpenAI
 import tiktoken
+from multiprocessing import Pool, cpu_count
 from agentsearch.dataset.agents import Agent, AgentStore, agents_df
 
 def get_agent_publications(agent: Agent) -> str:
@@ -80,46 +81,96 @@ def create_batch_request(agent_id: str, publications: str) -> dict:
     }
 
 
+def process_agent(agent_data):
+    """
+    Worker function to process a single agent's publications.
+    Returns tuple of (agent_id, agent_name, batch_request, error, was_truncated)
+    """
+    agent_id, use_llm_agent_card = agent_data
+    
+    try:
+        # Create agent from store
+        from agentsearch.dataset.agents import AgentStore
+        agent_store = AgentStore(use_llm_agent_card=use_llm_agent_card)
+        agent = agent_store.from_id(agent_id, shallow=True)
+        
+        # Get publications
+        publications = get_agent_publications(agent)
+        
+        if not publications:
+            return (agent.id, agent.name, None, "No publications found", False)
+        
+        # Truncate if needed
+        encoding = tiktoken.encoding_for_model("gpt-4")
+        tokens = encoding.encode(publications)
+        was_truncated = False
+        
+        token_limit = 990_000
+        if len(tokens) > token_limit:
+            was_truncated = True
+            truncated_tokens = tokens[:token_limit]
+            publications = encoding.decode(truncated_tokens)
+        
+        # Create batch request
+        batch_request = create_batch_request(agent.id, publications)
+        
+        return (agent.id, agent.name, batch_request, None, was_truncated)
+        
+    except Exception as e:
+        return (agent_id, None, None, str(e), False)
+
+
 def main():
     api_key = os.getenv('OPENAI_API_KEY')
     if not api_key:
         raise ValueError("Please set OPENAI_API_KEY environment variable")
     
     client = OpenAI(api_key=api_key)
-    encoding = tiktoken.encoding_for_model("gpt-4")
     
     batch_requests_file = "batch_requests.jsonl"
     csv_file = "data/agentcards.csv"
     
     print("Preparing batch requests...")
     
-    # Collect all batch requests
+    # Get all agent IDs
+    agent_store = AgentStore(use_llm_agent_card=False)
+    agent_ids = [agent.id for agent in agent_store.all(shallow=True)]
+    
+    # Prepare data for parallel processing
+    agent_data = [(agent_id, False) for agent_id in agent_ids]
+    
+    # Process agents in parallel
+    num_workers = min(cpu_count(), 8)  # Cap at 8 workers to avoid overwhelming the system
+    print(f"Processing {len(agent_ids)} agents using {num_workers} parallel workers...")
+    
     batch_requests = []
     agent_info = {}
+    truncated_count = 0
     
-    agent_store = AgentStore(use_llm_agent_card=False)
-
-    for agent_id in tqdm([508], desc="Collecting publications"):
-        agent = agent_store.from_id(agent_id, shallow=True)
-        publications = get_agent_publications(agent)
-        
-        if not publications:
-            print(f"Warning: No publications found for {agent.name} (ID: {agent_id})")
-            agent_info[agent_id] = {"name": agent.name, "error": "No publications found"}
-            continue
-        
-        # Truncate to 1M tokens using tiktoken
-        tokens = encoding.encode(publications)
-        
-        if len(tokens) > 1_000_000:
-            print(f"Truncating publications for {agent.name} from {len(tokens):,} to 1,000,000 tokens")
-            truncated_tokens = tokens[:1_000_000]
-            publications = encoding.decode(truncated_tokens)
-        
-        # Create batch request
-        batch_request = create_batch_request(agent_id, publications)
-        batch_requests.append(batch_request)
-        agent_info[agent_id] = {"name": agent.name, "error": None}
+    with Pool(processes=num_workers) as pool:
+        # Process agents in parallel with progress bar
+        results = list(tqdm(
+            pool.imap(process_agent, agent_data),
+            total=len(agent_data),
+            desc="Processing publications"
+        ))
+    
+    # Process results
+    for agent_id, agent_name, batch_request, error, was_truncated in results:
+        if error:
+            if agent_name:
+                print(f"Warning: {agent_name} (ID: {agent_id}): {error}")
+            agent_info[agent_id] = {"name": agent_name, "error": error}
+        else:
+            if was_truncated:
+                truncated_count += 1
+                print(f"Truncated publications for {agent_name}")
+            
+            if batch_request:
+                batch_requests.append(batch_request)
+                agent_info[agent_id] = {"name": agent_name, "error": None}
+    
+    print(f"\nTruncated {truncated_count} agents out of {len(agent_ids)} agents ({truncated_count/len(agent_ids)*100:.2f}%)")
     
     if not batch_requests:
         print("No valid batch requests to process")

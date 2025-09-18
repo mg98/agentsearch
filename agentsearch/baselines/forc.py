@@ -3,7 +3,15 @@ import torch.nn as nn
 import torch.optim as optim
 from transformers import DistilBertModel, DistilBertTokenizer, DistilBertConfig
 from dataclasses import dataclass
-from agentsearch.dataset.agents import agents_df
+from agentsearch.dataset.agents import agents_df, AgentStore, Agent
+from agentsearch.dataset.questions import Question
+from sklearn.model_selection import train_test_split
+from tqdm import tqdm
+import numpy as np
+
+NUM_EPOCHS = 5
+BATCH_SIZE = 128
+Data = list[str, int, float] # Question text, agent ID, score
 
 @dataclass
 class ModelConfig:
@@ -220,17 +228,9 @@ class FORCTrainer:
             
             # Get predictions
             predictions = self.model(input_ids, attention_mask)
-            
-            # Compute metrics
             loss = self.model.compute_loss(predictions, targets)
-            
-            # Binary classification metrics
             bce_loss = loss.item()
-            
-            # Convert probabilities to binary predictions
             binary_preds = (predictions > 0.5).float()
-            
-            # Accuracy
             accuracy = torch.mean((binary_preds == targets).float()).item()
             
             # Precision, Recall, F1
@@ -283,3 +283,50 @@ class FORCTrainer:
         
         return LambdaLR(self.optimizer, lr_lambda, last_epoch)
 
+def create_trained_meta_model(data: list[Data]) -> tuple[FORCMetaModel, FORCTrainer]:
+    model = FORCMetaModel(ModelConfig())
+    trainer = FORCTrainer(model)
+    train_data, val_data = train_test_split(data, test_size=0.2, random_state=42)
+    num_batches = (len(train_data) + BATCH_SIZE - 1) // BATCH_SIZE
+    epoch_losses = []
+
+    for epoch in range(NUM_EPOCHS):
+        pbar = tqdm(range(0, len(train_data), BATCH_SIZE), 
+                    desc=f"  Epoch {epoch+1}/{NUM_EPOCHS} - Training",
+                    total=num_batches)
+        for i in pbar:
+            batch = train_data[i:i+BATCH_SIZE]
+            loss = trainer.train_step(batch)
+            epoch_losses.append(loss)
+            pbar.set_postfix({'loss': f'{loss:.4f}'})
+
+        avg_train_loss = np.mean(epoch_losses)
+        val_metrics = trainer.evaluate(val_data)
+        print(f"    Epoch {epoch+1}: train_loss={avg_train_loss:.4f}, val_loss={val_metrics['loss']:.4f}, "
+                f"val_acc={val_metrics['accuracy']:.4f}, val_f1={val_metrics['f1']:.4f}")
+        
+    return model, trainer
+
+def forc_match(model: FORCMetaModel, trainer: FORCTrainer, agent_store: AgentStore, question: Question) -> list[Agent]:
+    # matches = agent_store.match_by_qid(question.id, top_k=8)
+    # inputs = [(question.id, match.agent.id) for match in matches]
+    agents = agent_store.all(shallow=True)
+    inputs = [(question.question, agent.id) for agent in agents]
+
+    # Process agents in batches for this question
+    question_pred_probs = []
+    for i in range(0, len(inputs), BATCH_SIZE):
+        batch_inputs = inputs[i:i+BATCH_SIZE]
+        encoded = model.prepare_input(batch_inputs)
+        input_ids = encoded['input_ids'].to(trainer.device)
+        attention_mask = encoded['attention_mask'].to(trainer.device)
+        predictions = model(input_ids, attention_mask)
+        batch_pred_probs = predictions.cpu().detach().numpy().flatten()
+        question_pred_probs.extend(batch_pred_probs)
+    
+    # Find best agent for this question
+    agent_predictions = [(agent_id, pred_prob) for agent_id, pred_prob in zip([agent.id for agent in agents], question_pred_probs)]
+    agent_predictions.sort(key=lambda x: x[1], reverse=True)
+
+    # Return top 8 agents based on prediction probabilities
+    return list(map(lambda x: agent_store.from_id(x[0], shallow=True), agent_predictions[:8]))

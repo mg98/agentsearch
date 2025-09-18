@@ -31,13 +31,10 @@ def retrieve_with_embedding(agent_id: int, query_embedding: np.ndarray, k: int =
     )
 
     # Query directly with embedding using the collection
-    print(f"QUERYING")
     search_results = vector_store._collection.query(
         query_embeddings=[query_embedding.tolist()],
         n_results=k,
-        include=['documents', 'metadatas', 'distances']
     )
-    print(f"QUERYING DONE")
     
     # Convert results to Document objects
     documents = []
@@ -47,7 +44,7 @@ def retrieve_with_embedding(agent_id: int, query_embedding: np.ndarray, k: int =
             similarity_score = 1 - distance
             
             if similarity_score >= 0.5:
-                metadata = search_results['metadatas'][0][i] if search_results['metadatas'] else {}
+                metadata = search_results['metadatas'][0][i] if search_results['metadatas'] and search_results['metadatas'][0][i] is not None else {}
                 documents.append(Document(page_content=doc_content, metadata=metadata))
     
     return documents
