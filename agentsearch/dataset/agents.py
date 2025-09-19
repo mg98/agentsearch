@@ -27,6 +27,8 @@ agentcards_df = pd.read_csv('data/agentcards.csv', index_col=0)
 agentcards_df = agentcards_df.reindex(agents_df.index)
 
 def num_sources_to_score(num_sources: int) -> float:
+    if num_sources >= 100:
+        return 1.0
     return np.log(num_sources + 1) / np.log(101)
 
 @dataclass
@@ -111,6 +113,8 @@ class AgentStore:
     def from_id(self, id: int, shallow: bool = False) -> 'Agent':
         if self.use_llm_agent_card:
             agent_card = agentcards_df.loc[id, 'agent_card']
+            if type(agent_card) != str:
+                agent_card = ', '.join(agents_df.loc[id, 'research_fields'])
         else:
             agent_card = ', '.join(agents_df.loc[id, 'research_fields'])
 

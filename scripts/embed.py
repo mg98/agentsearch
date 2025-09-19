@@ -65,6 +65,9 @@ def create_question_collection():
 def create_agent_collection(agent_store: AgentStore):
     agent_store._store.reset_collection()
     agents = agent_store.all(shallow=True)
+    for agent in agents:
+        if type(agent.agent_card) != str:
+            print(agent)
 
     documents = [Document(
         page_content=agent.agent_card,
@@ -98,12 +101,12 @@ if __name__ == "__main__":
         print("Creating question collection...")
         create_question_collection()
     elif mode == 'agents':
-        # print("Creating agents collection with LLM agent cards...")
-        # agent_store = AgentStore(use_llm_agent_card=True)
-        # create_agent_collection(agent_store)
-
-        print("Creating agents collection with human agent cards...")
+        print("Creating agents collection with original agent cards...")
         agent_store = AgentStore(use_llm_agent_card=False)
+        create_agent_collection(agent_store)
+
+        print("Creating agents collection with LLM-generated agent cards...")
+        agent_store = AgentStore(use_llm_agent_card=True)
         create_agent_collection(agent_store)
     elif mode == 'papers':
         print("Creating paper collections...")

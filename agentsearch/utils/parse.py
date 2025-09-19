@@ -21,7 +21,9 @@ def remove_citations(text):
     # Remove bracketed citations like [1], [1-2], [1,2], [1, 2, 3]
     text = re.sub(r'\[\d+(?:-\d+)?(?:,\s*\d+)*\]', '', text)
     # Remove parenthetical citations like (Wang et al., 2023e) or (OpenAI, 2023; Reid et al., 2024)
-    text = re.sub(r'\([^()]+?,\s*\d{4}[a-z]?(?:;\s*[^()]+?,\s*\d{4}[a-z]?)*\)', '', text)
+    # text = re.sub(r'\([^()]+?,\s*\d{4}[a-z]?(?:;\s*[^()]+?,\s*\d{4}[a-z]?)*\)', '', text)
+    # Using a simpler, more efficient pattern to avoid catastrophic backtracking
+    text = re.sub(r'\([^()]*\d{4}[a-z]?[^()]*\)', '', text)
     # Clean up extra spaces left by citation removal
     text = re.sub(r'\s+', ' ', text).strip()
     return text

@@ -55,6 +55,7 @@ class MatchResult:
     score: float # real score
 
 def compute_metrics(match_results: list[MatchResult]) -> EvalMetrics:
+    score_1 = match_results[0].score
     precision_1 = int(match_results[0].score > 0)
     precision_3 = sum([int(score > 0) for score in match_results[:3]]) / 3
     rr_8 = next((1 / (match_result.rank + 1) for match_result in match_results if match_result.score > 0), 0)
@@ -76,7 +77,7 @@ def compute_question_agent_matrix(questions: list[Question], agents: list[Agent]
         )
         results = vector_store._collection.query(
             query_embeddings=np.array([q.embedding for q in questions]),
-            n_results=1000,
+            n_results=100,
             include=['distances']
         )
 
@@ -88,16 +89,3 @@ def compute_question_agent_matrix(questions: list[Question], agents: list[Agent]
             matrix[question_idx, agent_idx] = num_sources #num_sources_to_score(num_sources)
             
     return matrix
-
-def full_eval(match_fn: Callable[[Question], list[Agent]]):
-    for q in load_test_questions():
-
-        top_agents: list[Agent] = match_fn(q)
-        top_agents_scores: list[MatchResult] = []
-
-        for rank, top_agent in enumerate(top_agents):
-            score = top_agent.grade(q)
-            top_agents_scores.append(MatchResult(rank, top_agent, score))
-
-        
-    pass
