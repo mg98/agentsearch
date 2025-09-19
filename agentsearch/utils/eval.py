@@ -29,23 +29,32 @@ def load_test_questions() -> list[Question]:
         test_qids = [int(qid.strip()) for qid in f.read().split(',')]
     return Question.many(test_qids, shallow=False)
 
-class Oracle:
+class TestOracle:
+    """
+    Oracle for the test questions.
+    Retrieves agents based on their real and verified abilities to answer a test question.
+    """
     def __init__(self):
         self.matrix = np.load('data/test_matrix.npy')
         with open('data/test_qids.txt', 'r') as f:
-            self.test_qids = [int(qid.strip()) for qid in f.read().split(',')]    
+            self.test_qids = [int(qid.strip()) for qid in f.read().split(',')]
 
-    def match(self, agent_store: AgentStore, question: Question, top_k=8) -> list[Agent]:
-        question_scores = self.matrix[self.test_qids.index(question.id)]
-        top_agents = np.argsort(question_scores)[::-1][:top_k]
-        agent_ids = agents_df.iloc[top_agents].index.tolist()
-        return list(map(lambda id: agent_store.from_id(id, shallow=True), agent_ids))
-
-    def match_ids(self, question_id: int, top_k=8) -> list[int]:
+    def rank_agent_ids(self, question_id: int, top_k=8) -> list[int]:
+        """
+        Returns top-k agent IDs for a given question ID.
+        """
+        if question_id not in self.test_qids:
+            raise ValueError(f"Question ID {question_id} not found in test questions")
         question_scores = self.matrix[self.test_qids.index(question_id)]
         top_agents = np.argsort(question_scores)[::-1][:top_k]
-        agent_ids = agents_df.iloc[top_agents].index.tolist()
-        return agent_ids
+        return agents_df.iloc[top_agents].index.tolist()
+
+    def rank_agents(self, agent_store: AgentStore, question: Question, top_k=8) -> list[Agent]:
+        """
+        Wrapper around `rank_agent_ids` that returns `Agent` objects.
+        """
+        agent_ids = self.rank_agent_ids(question.id, top_k)
+        return list(map(lambda id: agent_store.from_id(id, shallow=True), agent_ids))
 
 @dataclass
 class EvalMetrics:
