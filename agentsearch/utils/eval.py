@@ -39,15 +39,36 @@ class TestOracle:
         with open('data/test_qids.txt', 'r') as f:
             self.test_qids = [int(qid.strip()) for qid in f.read().split(',')]
 
+    def _map_question_id(self, question_id: int) -> int:
+        """
+        Returns row index matching question ID.
+        """
+        return self.test_qids.index(question_id)
+
+    def _map_agent_id(self, agent_id: int) -> int:
+        """
+        Returns column index matching agent ID.
+        """
+        return list(agents_df.index).index(agent_id)
+
+    def get_score(self, question_id: int, agent_id: int) -> float:
+        """
+        Returns the score for a given question ID and agent ID.
+        """
+        return self.matrix[
+            self._map_question_id(question_id), 
+            self._map_agent_id(agent_id)
+            ]
+
     def rank_agent_ids(self, question_id: int, top_k=8) -> list[int]:
         """
         Returns top-k agent IDs for a given question ID.
         """
         if question_id not in self.test_qids:
             raise ValueError(f"Question ID {question_id} not found in test questions")
-        question_scores = self.matrix[self.test_qids.index(question_id)]
-        top_agents = np.argsort(question_scores)[::-1][:top_k]
-        return agents_df.iloc[top_agents].index.tolist()
+        question_scores = self.matrix[self._map_question_id(question_id)]
+        top_agent_indices = np.argsort(question_scores)[::-1][:top_k]
+        return agents_df.iloc[top_agent_indices].index.tolist()
 
     def rank_agents(self, agent_store: AgentStore, question: Question, top_k=8) -> list[Agent]:
         """
