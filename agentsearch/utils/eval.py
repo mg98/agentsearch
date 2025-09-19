@@ -35,11 +35,17 @@ class Oracle:
         with open('data/test_qids.txt', 'r') as f:
             self.test_qids = [int(qid.strip()) for qid in f.read().split(',')]    
 
-    def match(self, agent_store: AgentStore, question: Question) -> list[Agent]:
+    def match(self, agent_store: AgentStore, question: Question, top_k=8) -> list[Agent]:
         question_scores = self.matrix[self.test_qids.index(question.id)]
-        top_agents = np.argsort(question_scores)[::-1][:8]
+        top_agents = np.argsort(question_scores)[::-1][:top_k]
         agent_ids = agents_df.iloc[top_agents].index.tolist()
         return list(map(lambda id: agent_store.from_id(id, shallow=True), agent_ids))
+
+    def match_ids(self, question_id: int, top_k=8) -> list[int]:
+        question_scores = self.matrix[self.test_qids.index(question_id)]
+        top_agents = np.argsort(question_scores)[::-1][:top_k]
+        agent_ids = agents_df.iloc[top_agents].index.tolist()
+        return agent_ids
 
 @dataclass
 class EvalMetrics:
