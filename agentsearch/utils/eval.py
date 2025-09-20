@@ -58,7 +58,7 @@ class TestOracle:
         return self.matrix[
             self._map_question_id(question_id), 
             self._map_agent_id(agent_id)
-            ]
+            ].item()
 
     def rank_agent_ids(self, question_id: int, top_k=8) -> list[int]:
         """
