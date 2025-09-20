@@ -64,8 +64,6 @@ class TestOracle:
         """
         Returns top-k agent IDs for a given question ID.
         """
-        if question_id not in self.test_qids:
-            raise ValueError(f"Question ID {question_id} not found in test questions")
         question_scores = self.matrix[self._map_question_id(question_id)]
         top_agent_indices = np.argsort(question_scores)[::-1][:top_k]
         return agents_df.iloc[top_agent_indices].index.tolist()
