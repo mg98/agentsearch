@@ -5,12 +5,13 @@ from transformers import DistilBertModel, DistilBertTokenizer, DistilBertConfig
 from dataclasses import dataclass
 from agentsearch.dataset.agents import agents_df, AgentStore, Agent
 from agentsearch.dataset.questions import Question
+from agentsearch.utils.globals import get_torch_device
 from sklearn.model_selection import train_test_split
 from tqdm import tqdm
 import numpy as np
 
 NUM_EPOCHS = 5
-BATCH_SIZE = 128
+BATCH_SIZE = 64
 Data = list[str, int, float] # Question text, agent ID, score
 
 @dataclass
@@ -151,9 +152,9 @@ class FORCTrainer:
     - Polynomial learning rate scheduler
     """
     
-    def __init__(self, model: FORCMetaModel, device: str = 'mps'):
-        self.model = model.to(device)
-        self.device = device
+    def __init__(self, model: FORCMetaModel):
+        self.device = get_torch_device()
+        self.model = model.to(self.device)
         self.optimizer = model.configure_optimizer()
         self.gradient_clip_val = model.config.gradient_clipping
         

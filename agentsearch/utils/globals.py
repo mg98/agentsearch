@@ -1,4 +1,5 @@
 import requests
+import torch
 
 db_location = "./chroma_db"
 EMBEDDING_DIM = 768
@@ -22,3 +23,11 @@ else:
         encode_kwargs={'normalize_embeddings': True}
     )
     print("Using HuggingFace embeddings")
+
+def get_torch_device():
+    if torch.cuda.is_available():
+        return torch.device('cuda')
+    elif torch.backends.mps.is_available():
+        return torch.device('mps')
+    else:
+        return torch.device('cpu')

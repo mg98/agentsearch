@@ -17,6 +17,7 @@ import torch.nn.functional as F
 from sklearn.model_selection import train_test_split
 from agentsearch.dataset.agents import AgentStore, Agent
 from agentsearch.dataset.questions import Question
+from agentsearch.utils.globals import get_torch_device
 
 Data = list[str, str, float] # Question text, agent card, score
 BATCH_SIZE = 64
@@ -46,7 +47,7 @@ class BERTCrossEncoderReranker:
                        - "cross-encoder/ms-marco-MiniLM-L-12-v2" (more accurate, slower)
                        - "cross-encoder/qnli-distilroberta-base" (for Q&A tasks)
         """
-        self.device = torch.device("mps")
+        self.device = get_torch_device()
         self.tokenizer = AutoTokenizer.from_pretrained(model_name)
         self.model = AutoModelForSequenceClassification.from_pretrained(model_name)
         self.model.to(self.device)
@@ -131,7 +132,7 @@ class BERTCrossEncoderReranker:
             
         return results
     
-    def rerank_with_agents(self, query: str, agent_matches: list) -> list[Agent]:
+    def rerank_with_agents(self, agent_store: AgentStore, query: str, agent_matches: list) -> list[Agent]:
         """
         Re-rank and return agent matches with updated scores.
         
@@ -143,7 +144,7 @@ class BERTCrossEncoderReranker:
             List of Agent ordered by cross-encoder score (descending)
         """
         rerank_results = self.rerank(query, agent_matches, top_k=8)
-        return list(map(lambda x: AgentStore.from_id(x.agent_id, shallow=True), rerank_results))
+        return list(map(lambda x: agent_store.from_id(x.agent_id, shallow=True), rerank_results))
 
 
 class RerankingDataset(Dataset):
@@ -206,7 +207,7 @@ def create_trained_reranker(data: list[Data]) -> BERTCrossEncoderReranker:
     epochs = 5
     learning_rate = 2e-5
     warmup_steps = 100
-    device = torch.device('mps')
+    device = get_torch_device()
     train_data, val_data = train_test_split(data, test_size=0.2, random_state=42)
     
     # Load pre-trained model and tokenizer
@@ -298,8 +299,8 @@ def create_trained_reranker(data: list[Data]) -> BERTCrossEncoderReranker:
 def rerank_match(reranker: BERTCrossEncoderReranker, agent_store: AgentStore, question: Question) -> list[Agent]:
     initial_matches = agent_store.match_by_qid(question.id, top_k=100)
     reranked_agents = reranker.rerank_with_agents(
+        agent_store=agent_store,
         query=question.question,
         agent_matches=initial_matches,
-        top_k=8
     )
     return reranked_agents
