@@ -15,8 +15,16 @@ class PointwiseModel(nn.Module):
             nn.Dropout(0.2),
             nn.Linear(hidden_dim // 2, 1)
         )
+        self.register_buffer('feature_min', torch.zeros(input_dim))
+        self.register_buffer('feature_max', torch.ones(input_dim))
+
+    def normalize(self, x: torch.Tensor) -> torch.Tensor:
+        range_vals = self.feature_max - self.feature_min
+        range_vals = torch.where(range_vals == 0, torch.ones_like(range_vals), range_vals)
+        return (x - self.feature_min) / range_vals
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
+        x = self.normalize(x)
         return self.net(x).squeeze(-1)
 
 
@@ -49,6 +57,9 @@ def train_model(
 
     X = torch.stack([feature_vector_to_tensor(fv) for fv, _ in x_y_data]).to(device)
     y = torch.tensor([score for _, score in x_y_data], dtype=torch.float32).to(device)
+
+    model.feature_min = X.min(dim=0).values
+    model.feature_max = X.max(dim=0).values
 
     dataset = torch.utils.data.TensorDataset(X, y)
     dataloader = torch.utils.data.DataLoader(dataset, batch_size=batch_size, shuffle=True)
