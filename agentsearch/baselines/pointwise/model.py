@@ -25,7 +25,8 @@ class PointwiseModel(nn.Module):
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         x = self.normalize(x)
-        return self.net(x).squeeze(-1)
+        logits = self.net(x).squeeze(-1)
+        return torch.sigmoid(logits)
 
 
 def feature_vector_to_tensor(fv: FeatureVector) -> torch.Tensor:
@@ -53,10 +54,10 @@ def train_model(
     device = get_torch_device()
     model = PointwiseModel().to(device)
     optimizer = torch.optim.Adam(model.parameters(), lr=lr)
-    criterion = nn.MSELoss()
+    criterion = nn.BCELoss()
 
     X = torch.stack([feature_vector_to_tensor(fv) for fv, _ in x_y_data]).to(device)
-    y = torch.tensor([score for _, score in x_y_data], dtype=torch.float32).to(device)
+    y = torch.tensor([1.0 if score > 0 else 0.0 for _, score in x_y_data], dtype=torch.float32).to(device)
 
     model.feature_min = X.min(dim=0).values
     model.feature_max = X.max(dim=0).values

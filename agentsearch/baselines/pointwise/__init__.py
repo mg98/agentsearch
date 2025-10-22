@@ -30,6 +30,7 @@ def pointwise_match(history: list[PointwiseData], cluster_data: ClusterData, mod
     with torch.no_grad():
         scores = model(X).cpu().numpy()
 
+    print(scores)
     ranked_indices = sorted(range(len(scores)), key=lambda i: scores[i], reverse=True)
     ranked_agents = [agents[i] for i in ranked_indices]
     return ranked_agents
