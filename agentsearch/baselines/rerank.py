@@ -19,7 +19,7 @@ from agentsearch.dataset.agents import AgentStore, Agent
 from agentsearch.dataset.questions import Question
 from agentsearch.utils.globals import get_torch_device
 
-Data = list[str, str, float] # Question text, agent card, score
+RerankData = tuple[str, str, float] # Question text, agent card, score
 BATCH_SIZE = 64
 
 @dataclass
@@ -150,7 +150,7 @@ class BERTCrossEncoderReranker:
 class RerankingDataset(Dataset):
     """Dataset for fine-tuning the cross-encoder model"""
     
-    def __init__(self, data: list[tuple[str, str, float]], tokenizer, max_length: int = 512):
+    def __init__(self, data: list[RerankData], tokenizer, max_length: int = 512):
         """
         Args:
             data: List of (question_text, agent_card, score) tuples
@@ -184,7 +184,7 @@ class RerankingDataset(Dataset):
         }
 
 
-def create_trained_reranker(data: list[Data]) -> BERTCrossEncoderReranker:
+def create_trained_reranker(data: list[RerankData]) -> BERTCrossEncoderReranker:
     """
     Fine-tune a BERT cross-encoder model for re-ranking.
     

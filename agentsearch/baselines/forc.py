@@ -12,7 +12,7 @@ import numpy as np
 
 NUM_EPOCHS = 5
 BATCH_SIZE = 64
-Data = list[str, int, float] # Question text, agent ID, score
+FORCData = tuple[str, int, int] # Question text, agent ID, binary_score
 
 @dataclass
 class ModelConfig:
@@ -72,23 +72,15 @@ class FORCMetaModel(nn.Module):
             scores: Tensor of shape (batch_size, 1)
                 Predicted probability that the agent can solve the query
         """
-        # Get DistilBERT outputs
         outputs = self.distilbert(
             input_ids=input_ids,
             attention_mask=attention_mask
         )
-        
-        # Use the [CLS] token representation (first token)
         cls_output = outputs.last_hidden_state[:, 0, :]  # (batch_size, 768)
-        
-        # Apply dropout
         cls_output = self.dropout(cls_output)
-        
-        # Get logits for binary classification
         logits = self.classifier(cls_output)  # (batch_size, 1)
-        
-        # Apply sigmoid for probability output
         scores = self.sigmoid(logits)
+
         return scores
     
     def prepare_input(self, inputs: list[tuple[str, int]]) -> dict:
@@ -158,7 +150,7 @@ class FORCTrainer:
         self.optimizer = model.configure_optimizer()
         self.gradient_clip_val = model.config.gradient_clipping
         
-    def train_step(self, training_data: list[tuple[str, int, float]]) -> float:
+    def train_step(self, training_data: list[FORCData]) -> float:
         """
         Perform a single training step following FORC paper procedure.
         
@@ -184,24 +176,16 @@ class FORCTrainer:
         attention_mask = encoded['attention_mask'].to(self.device)
         targets = targets.to(self.device)
         
-        # Forward pass
         predictions = self.model(input_ids, attention_mask)
-        
-        # Compute loss
         loss = self.model.compute_loss(predictions, targets)
-        
-        # Backward pass
         loss.backward()
         
-        # Gradient clipping (Euclidean norm)
         torch.nn.utils.clip_grad_norm_(self.model.parameters(), self.gradient_clip_val)
-        
-        # Optimizer step
         self.optimizer.step()
         
         return loss.item()
     
-    def evaluate(self, evaluation_data: list[tuple[str, int, float]]) -> dict:
+    def evaluate(self, evaluation_data: list[FORCData]) -> dict:
         """
         Evaluate the model on validation data.
         
@@ -221,16 +205,26 @@ class FORCTrainer:
         targets = torch.tensor([item[2] for item in evaluation_data], dtype=torch.float32).reshape(-1, 1)
         
         with torch.no_grad():
-            # Prepare input
-            encoded = self.model.prepare_input(zip(queries, agent_ids))
-            input_ids = encoded['input_ids'].to(self.device)
-            attention_mask = encoded['attention_mask'].to(self.device)
-            targets = targets.to(self.device)
-            
-            # Get predictions
-            predictions = self.model(input_ids, attention_mask)
-            loss = self.model.compute_loss(predictions, targets)
-            bce_loss = loss.item()
+            # Batch predictions with BATCH_SIZE
+            all_predictions = []
+            all_targets = []
+            bce_losses = []
+            for i in range(0, len(queries), BATCH_SIZE):
+                batch_queries = queries[i:i+BATCH_SIZE]
+                batch_agent_ids = agent_ids[i:i+BATCH_SIZE]
+                batch_targets = targets[i:i+BATCH_SIZE]
+                encoded = self.model.prepare_input(zip(batch_queries, batch_agent_ids))
+                input_ids = encoded['input_ids'].to(self.device)
+                attention_mask = encoded['attention_mask'].to(self.device)
+                batch_targets = batch_targets.to(self.device)
+                predictions = self.model(input_ids, attention_mask)
+                loss = self.model.compute_loss(predictions, batch_targets)
+                bce_losses.append(loss.item() * len(batch_queries))
+                all_predictions.append(predictions.detach().cpu())
+                all_targets.append(batch_targets.detach().cpu())
+            predictions = torch.cat(all_predictions, dim=0)
+            targets = torch.cat(all_targets, dim=0)
+            bce_loss = sum(bce_losses) / len(queries)
             binary_preds = (predictions > 0.5).float()
             accuracy = torch.mean((binary_preds == targets).float()).item()
             
@@ -284,7 +278,7 @@ class FORCTrainer:
         
         return LambdaLR(self.optimizer, lr_lambda, last_epoch)
 
-def create_trained_meta_model(data: list[Data]) -> tuple[FORCMetaModel, FORCTrainer]:
+def create_trained_meta_model(data: list[FORCData]) -> tuple[FORCMetaModel, FORCTrainer]:
     model = FORCMetaModel(ModelConfig())
     trainer = FORCTrainer(model)
     train_data, val_data = train_test_split(data, test_size=0.2, random_state=42)
@@ -311,7 +305,8 @@ def create_trained_meta_model(data: list[Data]) -> tuple[FORCMetaModel, FORCTrai
 def forc_match(model: FORCMetaModel, trainer: FORCTrainer, agent_store: AgentStore, question: Question) -> list[Agent]:
     # matches = agent_store.match_by_qid(question.id, top_k=8)
     # inputs = [(question.id, match.agent.id) for match in matches]
-    agents = agent_store.all(shallow=True)
+    # agents = agent_store.all(shallow=True)
+    agents = [match.agent for match in agent_store.match_by_qid(question.id, top_k=8)]
     inputs = [(question.question, agent.id) for agent in agents]
 
     # Process agents in batches for this question
@@ -327,6 +322,7 @@ def forc_match(model: FORCMetaModel, trainer: FORCTrainer, agent_store: AgentSto
     
     # Find best agent for this question
     agent_predictions = [(agent_id, pred_prob) for agent_id, pred_prob in zip([agent.id for agent in agents], question_pred_probs)]
+    print(agent_predictions)
     agent_predictions.sort(key=lambda x: x[1], reverse=True)
 
     # Return top 8 agents based on prediction probabilities
