@@ -1,13 +1,13 @@
 from agentsearch.dataset.agents import AgentStore, Agent
 from agentsearch.dataset.questions import Question
-from agentsearch.baselines.pointwise.utils import ClusterData, compile_feature_vector
-from agentsearch.baselines.pointwise.model import PointwiseModel, train_model, feature_vector_to_tensor
+from agentsearch.baselines.ltr.utils import ClusterData, compile_feature_vector
+from agentsearch.baselines.ltr.model import LTRModel, train_model, feature_vector_to_tensor
 from agentsearch.utils.globals import get_torch_device
 import torch
 
-PointwiseData = tuple[Agent, Question, float]
+LTRData = tuple[Agent, Question, float]
 
-def init_pointwise(data: list[PointwiseData]) -> tuple[ClusterData, PointwiseModel]:
+def init_ltr(data: list[LTRData]) -> tuple[ClusterData, LTRModel]:
     questions = list(map(lambda d: d[1], data))
     cluster_data = ClusterData(questions)
 
@@ -19,7 +19,7 @@ def init_pointwise(data: list[PointwiseData]) -> tuple[ClusterData, PointwiseMod
     model = train_model(x_y_data)
     return cluster_data, model
 
-def pointwise_match(history: list[PointwiseData], cluster_data: ClusterData, model: PointwiseModel, agent_store: AgentStore, question: Question) -> list[Agent]:
+def ltr_match(history: list[LTRData], cluster_data: ClusterData, model: LTRModel, agent_store: AgentStore, question: Question) -> list[Agent]:
     matches = agent_store.match_by_qid(question.id, top_k=8)
     agents = list(map(lambda m: m.agent, matches))
 
@@ -30,7 +30,6 @@ def pointwise_match(history: list[PointwiseData], cluster_data: ClusterData, mod
     with torch.no_grad():
         scores = model(X).cpu().numpy()
 
-    print(scores)
     ranked_indices = sorted(range(len(scores)), key=lambda i: scores[i], reverse=True)
     ranked_agents = [agents[i] for i in ranked_indices]
     return ranked_agents

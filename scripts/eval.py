@@ -9,7 +9,7 @@ from agentsearch.dataset.questions import Question
 from agentsearch.baselines.rerank import create_trained_reranker, rerank_match, RerankData
 from agentsearch.baselines.forc import create_trained_meta_model, forc_match, FORCData
 from agentsearch.baselines.lambdamart import init_lambdamart, lambdamart_match, LambdaMARTData
-from agentsearch.baselines.pointwise import init_pointwise, pointwise_match, PointwiseData
+from agentsearch.baselines.ltr import init_ltr, ltr_match, LTRData
 
 def evaluate_baseline(baseline: str, agent_store: AgentStore, test_questions: list[Question],
                      oracle: TestOracle, graph_df: pd.DataFrame):
@@ -71,16 +71,16 @@ def evaluate_baseline(baseline: str, agent_store: AgentStore, test_questions: li
             score = oracle.get_score(question.id, top_agents[0].id)
             scores.append(score)
 
-    elif baseline == "pointwise":
-        data: list[PointwiseData] = []
+    elif baseline == "ltr":
+        data: list[LTRData] = []
         for _, row in graph_df.iterrows():
             agent = agent_store.from_id(int(row['target_agent']), shallow=False)
             question = Question.from_id(int(row['question']), shallow=False)
             data.append((agent, question, row['score']))
 
-        cluster_data, model = init_pointwise(data)
-        for question in tqdm(test_questions, desc="Evaluating Pointwise"):
-            top_agents: list[Agent] = pointwise_match(data, cluster_data, model, agent_store, question)
+        cluster_data, model = init_ltr(data)
+        for question in tqdm(test_questions, desc="Evaluating LTR"):
+            top_agents: list[Agent] = ltr_match(data, cluster_data, model, agent_store, question)
             score = oracle.get_score(question.id, top_agents[0].id)
             scores.append(score)
 
@@ -96,7 +96,7 @@ def evaluate_baseline(baseline: str, agent_store: AgentStore, test_questions: li
 def main():
     parser = argparse.ArgumentParser(description="Evaluate baselines for agent search")
     parser.add_argument("baseline", nargs="?", default="all",
-                       choices=["forc", "semantic", "bm25", "rerank", "pointwise", "all"],
+                       choices=["forc", "semantic", "bm25", "rerank", "ltr", "all"],
                        help="Baseline to evaluate (default: all)")
 
     args = parser.parse_args()
@@ -106,7 +106,7 @@ def main():
     oracle = TestOracle()
 
     # Available baselines
-    all_baselines = ["forc", "semantic", "bm25", "rerank", "pointwise"]
+    all_baselines = ["forc", "semantic", "bm25", "rerank", "ltr"]
     baselines_to_run = [args.baseline] if args.baseline != "all" else all_baselines
     print(baselines_to_run)
 
