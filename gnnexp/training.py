@@ -13,7 +13,7 @@ import logging
 import os
 
 
-def compute_metrics(predictions, targets):
+def compute_metrics_regression(predictions, targets):
     """Compute regression metrics"""
     with torch.no_grad():
         mse = nn.MSELoss()(predictions, targets)
@@ -33,7 +33,39 @@ def compute_metrics(predictions, targets):
         }
 
 
-def train_epoch(model, head, data, split_dict, optimizer, criterion, device, batchsize=64):
+def compute_metrics_binary_classification(probs: torch.Tensor, targets: torch.Tensor):
+    """Compute binary classification metrics
+
+    predictions: probabilities (after sigmoid)
+    targets: binary labels (0 or 1)
+    """
+
+    with torch.no_grad():
+        preds = (probs > 0.5).bool()
+        targets = targets.bool()
+
+        tp = (preds & targets).sum()
+        fp = (preds & ~targets).sum()
+        tn = (~preds & ~targets).sum()
+        fn = (~preds & targets).sum()
+
+        accuracy = (tp + tn) / (tp + fp + tn + fn)
+        precision = tp / (tp + fp + 1e-8)
+        recall = tp / (tp + fn + 1e-8)
+        f1 = 2 * (precision * recall) / (precision + recall)
+
+        return {
+            'accuracy': accuracy.item(),
+            'precision': precision.item(),
+            'recall': recall.item(),
+            'f1': f1.item(), 
+            'tp': tp.item(),
+            'fp': fp.item(),
+            'tn': tn.item(),
+            'fn': fn.item()
+        }
+
+def train_epoch(model, head, data, split_dict, optimizer, criterion, batchsize):
     """Train for one epoch"""
     model.train()
     
@@ -50,8 +82,8 @@ def train_epoch(model, head, data, split_dict, optimizer, criterion, device, bat
     shuffled_indices = split_dict['train_indices'][permutation]
 
     # for logging epoch stats
-    all_preds = torch.zeros_like(data.y[split_dict['train_mask']])  # to store predictions for the whole epoch
-    all_tgts = data.y[split_dict['train_mask']][permutation]
+    all_preds = torch.zeros_like(data.y[split_dict['train_mask']]).long()  # to store predictions for the whole epoch
+    all_tgts = data.y[split_dict['train_mask']][permutation].long()  # corresponding targets
     epoch_loss = 0.0
 
     for i in range(0, len(shuffled_indices), batchsize):
@@ -64,99 +96,110 @@ def train_epoch(model, head, data, split_dict, optimizer, criterion, device, bat
 
         assert (inclusive_mask & batch_mask).sum() == 0, "The inclusive mask and batch mask should not overlap."
 
-        # TODO we should probably put the head in a model
         # Forward pass with all train_edges (including labels!) except for the current batch
         # Ensure consistent dtype (avoid Double vs Float mismatch)
         model_dtype = next(model.parameters()).dtype
         edge_attributes_with_label = torch.cat((
-            data.edge_attr[inclusive_mask].to(model_dtype),      # take all edge attributes except the current batch
+            data.edge_attr[inclusive_mask].to(model_dtype),        # take all edge attributes except the current batch
             data.y[inclusive_mask].unsqueeze(1).to(model_dtype)),  # and add the trust score label
             dim=1
         )
 
-        node_embeddings, edge_embeddings = model(
+        node_embeddings, _ = model(
             data.x.to(model_dtype),
             data.edge_index[:, inclusive_mask],  # take all edges except the current batch
             edge_attributes_with_label
         )
 
         # Add the head
-        train_predictions = head(node_embeddings, data.edge_attr[batch_mask].to(model_dtype), data.edge_index[:, batch_mask])
+        train_logits = head(node_embeddings, data.edge_attr[batch_mask].to(model_dtype), data.edge_index[:, batch_mask])
 
         # Get the targets for the current batch
         train_targets = data.y[batch_mask]
 
-        loss = criterion(train_predictions, train_targets)
+        loss = criterion(train_logits, train_targets)
         # Backward pass
         optimizer.zero_grad()
         loss.backward()
 
+        # Compute probabilities and predictions
+        probs = torch.sigmoid(train_logits)
+
         # Store predictions for logging
-        all_preds[i:i + batchsize] = train_predictions
+        all_preds[i:i + batchsize] = probs
         epoch_loss += loss.item()
 
 
     # after the epoch is done, we step the optimizer
     optimizer.step()
     
-    # Compute metrics on the last batch
-    metrics = compute_metrics(all_preds, all_tgts)
-    metrics['loss'] = epoch_loss / len(shuffled_indices)
+    # Compute metrics on epoch
+    metrics = compute_metrics_binary_classification(all_preds, all_tgts)
+    metrics['loss'] = epoch_loss
     metrics['LR'] = optimizer.param_groups[0]['lr']
 
     return metrics
 
 
-def evaluate(model, head, data, split_dict, criterion, device, split='val'):
+def evaluate(model, head, data, split_dict, criterion, split='val'):
     """Evaluate model on validation or test set"""
     model.eval()
     
     with torch.no_grad():
-        # a split can use only its and previous splits' edges for inference
+        # validation and test use only the train edges
+        inclusive_mask = split_dict['train_mask'] 
+
         if split =='val':
-            inclusive_mask = split_dict['train_mask'] # validation uses train edges and their labels for message passing
             target_mask = split_dict['val_mask'] # the edges that we want to predict
         elif split == 'test':
-            inclusive_mask = split_dict['train_mask'] + split_dict[f'val_mask'] # test uses train and val edges
             target_mask = split_dict['test_mask'] # the edges that we want to predict
         else:
             raise ValueError(f"Unknown split: {split}")
 
         assert (inclusive_mask & target_mask).sum() == 0, "The inclusive mask and target mask should not overlap."
 
-        node_embeddings, edge_embeddings = model(
+        node_embeddings, _ = model(
             data.x, 
             data.edge_index[:, inclusive_mask], 
             torch.cat(
                 (data.edge_attr[inclusive_mask],
-                data.y[inclusive_mask].unsqueeze(1)),  # add the trust score label
+                data.y[inclusive_mask].unsqueeze(1)),  # add the trust score label from the train
                 dim=1
             )
         )
 
-        split_predictions = head(node_embeddings, data.edge_attr[target_mask], data.edge_index[:, target_mask])
+        split_logits = head(node_embeddings, data.edge_attr[target_mask], data.edge_index[:, target_mask])
         split_targets = data.y[target_mask]
 
-        loss = criterion(split_predictions, split_targets)
-        
+        loss = criterion(split_logits, split_targets)
+
+        # Compute probabilities and predictions
+        split_probs = torch.sigmoid(split_logits)
+
         # Compute metrics
-        metrics = compute_metrics(split_predictions, split_targets)
+        metrics = compute_metrics_binary_classification(split_probs, split_targets.long())
         metrics['loss'] = loss.item()
 
         return metrics
 
 
-def train_model(model, head, data, split_dict, config, device):
+def train_model(model, head, data, split_dict, config):
     """Complete training loop"""
     
     # Setup training
-    criterion = nn.MSELoss()
+    # criterion = nn.MSELoss() 
+    criterion = nn.BCEWithLogitsLoss()
+
     optimizer = optim.Adam(
         model.parameters(), 
         lr=config['training']['learning_rate'],
         weight_decay=config['training']['weight_decay']
     )
+    # add head parameters to optimizer
+    optimizer.add_param_group({'params': head.parameters()})
     
+    # TODO Scheduler
+
     # Initialize wandb
     wandb.init(
         project=config['experiment']['project_name'],
@@ -169,21 +212,21 @@ def train_model(model, head, data, split_dict, config, device):
     best_model_state = None
     
     logging.info("Starting training...")
-    
     for epoch in tqdm(range(config['training']['epochs']), desc="Training"):
         # Train
-        train_metrics = train_epoch(model, head, data, split_dict, optimizer, criterion, device, 
-                                    batchsize=config['training']['batchsize'])
+        train_metrics = train_epoch(model, head, data, split_dict, optimizer, criterion,  
+                                    config['training']['batchsize'])
         
         # Validate
-        val_metrics = evaluate(model, head, data, split_dict, criterion, device, split='val')
-        
+        val_metrics = evaluate(model, head, data, split_dict, criterion, split='val')
+
         # Log metrics
         if epoch % config['logging']['log_every'] == 0:
             logging.info(f"Epoch {epoch:3d} | "
                         f"Train Loss: {train_metrics['loss']:.4f} | "
                         f"Val Loss: {val_metrics['loss']:.4f} | "
-                        f"Val RMSE: {val_metrics['rmse']:.4f} | ")
+                        f"Train acc: {train_metrics['accuracy']:.4f} | "
+                        f"Val acc: {val_metrics['accuracy']:.4f} | ")
         
         # Log to wandb
         wandb.log({
@@ -202,13 +245,12 @@ def train_model(model, head, data, split_dict, config, device):
         model.load_state_dict(best_model_state)
     
     # Final evaluation on test set
-    test_metrics = evaluate(model, head, data, split_dict, criterion, device, split='test')
+    test_metrics = evaluate(model, head, data, split_dict, criterion, split='test')
     
     logging.info("Training completed!")
     logging.info(f"Final Test Metrics:")
-    logging.info(f"  Test Loss: {test_metrics['loss']:.4f}")
-    logging.info(f"  Test MAE: {test_metrics['mae']:.4f}")
-    logging.info(f"  Test RMSE: {test_metrics['rmse']:.4f}")
+    for k, v in test_metrics.items():
+        logging.info(f"  {k}: {v:.4f}")
     
     # Log final test metrics to wandb
     wandb.log({
@@ -251,6 +293,10 @@ def setup_model_and_training(graph_data, config):
     logging.info(f"  Node input dim: {node_input_dim}")
     logging.info(f"  Edge input dim: {edge_input_dim}")
     logging.info(f"  Model parameters: {sum(p.numel() for p in model.parameters()):,}")
-    print(f"  Model parameters: {sum(p.numel() for p in model.parameters()):,}")
+    # print by component
+    logging.info(f"     Node embedder parameters: {sum(p.numel() for p in model.node_embedder.parameters()):,}")
+    logging.info(f"     Edge embedder parameters: {sum(p.numel() for p in model.edge_embedder.parameters()):,}")
+    logging.info(f"     Message passing parameters: {sum(p.numel() for p in model.message_passing.parameters()):,}")
+    logging.info(f"  Head parameters: {sum(p.numel() for p in head.parameters()):,}")
     
     return model, head

@@ -1,13 +1,11 @@
 model:
-  node_embedding_dim: 64
-  edge_embedding_dim: 64
   hidden_dim: 64
-  num_layers: 1
+  num_layers: 3
   dropout: 0.0
 
 training:
   batchsize: 2048
-  epochs: 1000
+  epochs: 70
   learning_rate: 0.005
   weight_decay: 1e-5
 
@@ -21,8 +19,9 @@ data:
 experiment:
   seed: 42
   device: "cuda"
+  use_wandb: true
   project_name: "agentsearch"
-  experiment_name: "gnn"
+  experiment_name: "mlp"
   save_model: true
   model_save_path: "models/"
 

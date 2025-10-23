@@ -42,29 +42,6 @@ class EdgeEmbedder(nn.Module):
         return self.layers(edge_attr)
 
 
-class MessagePassingGCN(nn.Module):
-    """Graph Convolutional Network for message passing"""
-    
-    def __init__(self, input_dim, hidden_dim, num_layers=3, dropout=0.1):
-        super().__init__()
-        self.num_layers = num_layers
-        self.dropout = dropout
-        
-        self.convs = nn.ModuleList()
-        self.convs.append(GCNConv(input_dim, hidden_dim))
-        
-        for _ in range(num_layers - 1):
-            self.convs.append(GCNConv(hidden_dim, hidden_dim))
-            
-    def forward(self, x, edge_index):
-        for i, conv in enumerate(self.convs):
-            x = conv(x, edge_index)
-            if i < len(self.convs) - 1:  # Don't apply activation after last layer
-                x = F.relu(x)
-                x = F.dropout(x, p=self.dropout, training=self.training)
-        return x
-
-
 class EdgeUpdatingGAT(nn.Module):
     """GAT with Edge Updates"""
 
@@ -112,11 +89,11 @@ class EdgePredictionHead(nn.Module):
         
         self.layers = nn.Sequential(
             nn.Linear(input_dim, hidden_dim),
-            nn.ReLU(),
-            nn.Dropout(dropout),
-            nn.Linear(hidden_dim, hidden_dim),
-            nn.ReLU(),
-            nn.Dropout(dropout),
+            # nn.ReLU(),
+            # nn.Dropout(dropout),
+            # nn.Linear(hidden_dim, hidden_dim),
+            # nn.ReLU(),
+            # nn.Dropout(dropout),
             nn.Linear(hidden_dim, output_dim)
         )
         
@@ -130,7 +107,9 @@ class EdgePredictionHead(nn.Module):
         # Concatenate Source, Target, and Edge Features
         edge_features = torch.cat([src_embeddings, tgt_embeddings, edge_embeddings], dim=1)
         
-        return self.layers(edge_features).squeeze(-1)
+        logits = self.layers(edge_features).squeeze(-1)
+
+        return logits
 
 
 class HeadlessEdgeRegressionModel(nn.Module):
