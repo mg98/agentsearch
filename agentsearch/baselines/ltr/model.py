@@ -2,6 +2,7 @@ import torch
 import torch.nn as nn
 from agentsearch.baselines.ltr.utils import FeatureVector
 from agentsearch.utils.globals import get_torch_device
+from torch.utils.data import TensorDataset, DataLoader
 import wandb
 
 class LTRModel(nn.Module):
@@ -66,8 +67,6 @@ def train_model(
                 "val_split": val_split,
                 "patience": patience,
                 "model": "LTRModel",
-                "input_dim": 7,
-                "hidden_dim": 64
             }
         )
         wandb.watch(model, log="all", log_freq=10)
@@ -89,8 +88,8 @@ def train_model(
     X_train, y_train = X[train_indices], y[train_indices]
     X_val, y_val = X[val_indices], y[val_indices]
 
-    train_dataset = torch.utils.data.TensorDataset(X_train, y_train)
-    train_dataloader = torch.utils.data.DataLoader(train_dataset, batch_size=batch_size, shuffle=True)
+    train_dataset = TensorDataset(X_train, y_train)
+    train_dataloader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True)
 
     if use_wandb:
         wandb.log({
