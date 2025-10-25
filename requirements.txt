@@ -28,3 +28,4 @@ tiktoken
 rank-bm25
 lightgbm
 scikit-learn
+wandb

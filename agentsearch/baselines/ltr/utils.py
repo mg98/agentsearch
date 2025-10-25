@@ -16,6 +16,8 @@ class FeatureVector:
     topic_k32_success_rate: float
     topic_k8_num_reports: int
     topic_k8_success_rate: float
+    cosine_similarity_to_k32_centroid: float
+    cosine_similarity_to_k8_centroid: float
 
 
 class ClusterData:
@@ -77,6 +79,12 @@ def compile_feature_vector(history: list[LTRData], cluster_data: ClusterData, ag
     topic_k8_num_reports = len(topic_k8_history)
     topic_k8_success_rate = sum(1 for d in topic_k8_history if d[2] > 0) / topic_k8_num_reports if topic_k8_num_reports > 0 else 0.0
 
+    k32_centroid = cluster_data.centroids_k32[closest_cluster_k32]
+    cos_sim_k32 = np.dot(question.embedding, k32_centroid) / (np.linalg.norm(question.embedding) * np.linalg.norm(k32_centroid))
+
+    k8_centroid = cluster_data.centroids_k8[closest_cluster_k8]
+    cos_sim_k8 = np.dot(question.embedding, k8_centroid) / (np.linalg.norm(question.embedding) * np.linalg.norm(k8_centroid))
+
     return FeatureVector(
         cosine_similarity=float(cos_sim),
         num_reports=num_reports,
@@ -85,4 +93,6 @@ def compile_feature_vector(history: list[LTRData], cluster_data: ClusterData, ag
         topic_k32_success_rate=topic_k32_success_rate,
         topic_k8_num_reports=topic_k8_num_reports,
         topic_k8_success_rate=topic_k8_success_rate,
+        cosine_similarity_to_k32_centroid=float(cos_sim_k32),
+        cosine_similarity_to_k8_centroid=float(cos_sim_k8),
     )

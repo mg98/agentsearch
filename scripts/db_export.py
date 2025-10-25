@@ -8,23 +8,18 @@ def export_questions():
     """Export all questions from ChromaDB to questions.parquet"""
     print("Exporting questions...")
     
-    # Initialize questions collection
     questions_store = Chroma(
         collection_name='questions',
         persist_directory=db_location,
         embedding_function=embeddings
     )
     
-    # Get all question IDs from the dataframe
     question_ids = [str(qid) for qid in questions_df.index]
-    
-    # Retrieve embeddings from ChromaDB
     result = questions_store._collection.get(
         ids=question_ids,
         include=['embeddings']
     )
     
-    # Create a list to store question data
     questions_data = []
     
     for i, qid in enumerate(result['ids']):
@@ -37,7 +32,6 @@ def export_questions():
         }
         questions_data.append(question_record)
     
-    # Create DataFrame and save to parquet
     questions_export_df = pd.DataFrame(questions_data)
     questions_export_df.to_parquet('data/questions.parquet', index=False)
     print(f"Exported {len(questions_export_df)} questions to data/questions.parquet")

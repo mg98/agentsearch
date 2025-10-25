@@ -20,7 +20,7 @@ def init_ltr(data: list[LTRData]) -> tuple[ClusterData, LTRModel]:
     return cluster_data, model
 
 def ltr_match(history: list[LTRData], cluster_data: ClusterData, model: LTRModel, agent_store: AgentStore, question: Question) -> list[Agent]:
-    matches = agent_store.match_by_qid(question.id, top_k=8)
+    matches = agent_store.match_by_qid(question.id, top_k=64)
     agents = list(map(lambda m: m.agent, matches))
 
     feature_vectors = [compile_feature_vector(history, cluster_data, agent, question) for agent in agents]

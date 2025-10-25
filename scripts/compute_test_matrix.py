@@ -10,8 +10,13 @@ if __name__ == "__main__":
 
     print("Computing matrix...")
     matrix = compute_question_agent_matrix(questions, agents)
-    
-    print("Saving matrix to disk...")
+
+    print("Saving raw matrix to disk...")
     np.save('data/test_matrix_raw.npy', matrix)
-    print(f"Matrix saved with shape: {matrix.shape}")
+    print(f"Raw matrix saved with shape: {matrix.shape}")
+
+    print("Creating binary matrix (scores > 0 → 1)...")
+    binary_matrix = (matrix > 0).astype(np.int8)
+    np.save('data/test_matrix.npy', binary_matrix)
+    print(f"Binary matrix saved with shape: {binary_matrix.shape}")
     

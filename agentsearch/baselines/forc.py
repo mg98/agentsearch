@@ -322,7 +322,6 @@ def forc_match(model: FORCMetaModel, trainer: FORCTrainer, agent_store: AgentSto
     
     # Find best agent for this question
     agent_predictions = [(agent_id, pred_prob) for agent_id, pred_prob in zip([agent.id for agent in agents], question_pred_probs)]
-    print(agent_predictions)
     agent_predictions.sort(key=lambda x: x[1], reverse=True)
 
     # Return top 8 agents based on prediction probabilities

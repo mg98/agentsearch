@@ -83,7 +83,7 @@ if __name__ == '__main__':
         end_idx = start_idx + num_questions
         observed_agents_with_questions.append((agent, observed_agent_questions[start_idx:end_idx]))
         start_idx = end_idx
-    
+
     # Write test_core_agent_questions IDs to file for evaluation
     test_qids = [str(q.id) for q in test_questions]
     with open('data/test_qids.txt', 'w') as f:
@@ -105,5 +105,6 @@ if __name__ == '__main__':
             for edge in edges
         ])
         edges_df.to_csv(f'data/graph/edges_{int(attack_vol*100)}.csv', index=False)
+        break
 
     print(f"\n{Fore.GREEN}Saved graph data.{Style.RESET_ALL}")

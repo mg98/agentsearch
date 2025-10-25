@@ -25,5 +25,4 @@ In particular, our research focuses on developing a distributed form of self-awa
 ])      
 def test_grade_answer(question, answer, expected_grade):
     grade, reason = grade_answer(question, answer)
-    print(reason)
     assert grade == expected_grade

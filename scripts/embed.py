@@ -6,6 +6,7 @@ from langchain_core.documents import Document
 from agentsearch.dataset.questions import questions_store, questions_df
 from agentsearch.dataset.agents import Agent, AgentStore
 from agentsearch.utils.globals import db_location, embeddings
+from agentsearch.dataset.registries import registries_store, get_faculties, get_departments, get_groups
 
 def create_paper_collection(agent: Agent):
     collection_name = f'agent_{agent.id}'
@@ -62,6 +63,38 @@ def create_question_collection():
             ids=batch_ids
         )
 
+def create_registries_collection():
+    documents = [Document(
+        page_content=faculty,
+        metadata={
+            "parent": "root"
+        }) for faculty in get_faculties()]
+
+    for faculty in get_faculties():
+        documents += [Document(
+            page_content=department,
+            metadata={
+                "parent": faculty
+            }) for department in get_departments(faculty)]
+
+        for department in get_departments(faculty):
+            documents += [Document(
+                page_content=group,
+                metadata={
+                    "parent": department
+                }) for group in get_groups(faculty, department)]
+
+    BATCH_SIZE = 32
+    ids = [str(i) for i in range(len(documents))]
+    
+    for i in range(0, len(documents), BATCH_SIZE):
+        batch_documents = documents[i:i+BATCH_SIZE]
+        batch_ids = ids[i:i+BATCH_SIZE]
+        registries_store.add_documents(
+            documents=batch_documents,
+            ids=batch_ids
+        )
+
 def create_agent_collection(agent_store: AgentStore):
     agent_store._store.reset_collection()
     agents = agent_store.all(shallow=True)
@@ -76,6 +109,9 @@ def create_agent_collection(agent_store: AgentStore):
             "scholar_url": str(agent.scholar_url),
             "citation_count": int(agent.citation_count),
             "agent_card": str(agent.agent_card),
+            "faculty": str(agent.faculty),
+            "department": str(agent.department),
+            "group": str(agent.group),
         }) for agent in agents]
     
     agent_store._store.add_documents(
@@ -84,8 +120,8 @@ def create_agent_collection(agent_store: AgentStore):
     )
 
 if __name__ == "__main__":
-    if len(sys.argv) < 2 or sys.argv[1] not in ['questions', 'agents', 'papers']:
-        print("Usage: python -m scripts.embed [questions|agents|papers]")
+    if len(sys.argv) < 2 or sys.argv[1] not in ['questions', 'agents', 'papers', 'registries']:
+        print("Usage: python -m scripts.embed [questions|agents|papers|registries]")
         sys.exit(1)
         
     mode = sys.argv[1]
@@ -105,9 +141,10 @@ if __name__ == "__main__":
         agent_store = AgentStore(use_llm_agent_card=False)
         create_agent_collection(agent_store)
 
-        print("Creating agents collection with LLM-generated agent cards...")
-        agent_store = AgentStore(use_llm_agent_card=True)
-        create_agent_collection(agent_store)
+        ## Currently failing because of embedding model input token limit
+        # print("Creating agents collection with LLM-generated agent cards...")
+        # agent_store = AgentStore(use_llm_agent_card=True)
+        # create_agent_collection(agent_store)
     elif mode == 'papers':
         print("Creating paper collections...")
         agent_store = AgentStore(use_llm_agent_card=False)
@@ -115,6 +152,9 @@ if __name__ == "__main__":
 
         for agent in tqdm(agents, desc="Agents"):
             create_paper_collection(agent)
+    elif mode == 'registries':
+        print("Creating registries collection...")
+        create_registries_collection()
     else:
         print("Invalid mode")
         sys.exit(1)

@@ -10,6 +10,7 @@ from agentsearch.baselines.rerank import create_trained_reranker, rerank_match, 
 from agentsearch.baselines.forc import create_trained_meta_model, forc_match, FORCData
 from agentsearch.baselines.lambdamart import init_lambdamart, lambdamart_match, LambdaMARTData
 from agentsearch.baselines.ltr import init_ltr, ltr_match, LTRData
+from agentsearch.baselines.set_transformer import init_set_transformer, set_transformer_match, SetTransformerData
 
 def evaluate_baseline(baseline: str, agent_store: AgentStore, test_questions: list[Question],
                      oracle: TestOracle, graph_df: pd.DataFrame):
@@ -83,7 +84,27 @@ def evaluate_baseline(baseline: str, agent_store: AgentStore, test_questions: li
             top_agents: list[Agent] = ltr_match(data, cluster_data, model, agent_store, question)
             score = oracle.get_score(question.id, top_agents[0].id)
             scores.append(score)
+        
+        print(scores)
 
+    elif baseline == "set_transformer":
+        data: list[SetTransformerData] = []
+        for _, row in graph_df.iterrows():
+            agent = agent_store.from_id(int(row['target_agent']), shallow=False)
+            question = Question.from_id(int(row['question']), shallow=False)
+            data.append((agent, question, row['score']))
+
+        model = init_set_transformer(data)
+        for question in tqdm(test_questions, desc="Evaluating SetTransformer"):
+            top_agents: list[Agent] = set_transformer_match(data, model, agent_store, question)
+            score = oracle.get_score(question.id, top_agents[0].id)
+            scores.append(score)
+
+    elif baseline == "oracle":
+        for question in test_questions:
+            top_agents: list[Agent] = oracle.rank_agent_ids(question.id, top_k=1)
+            score = oracle.get_score(question.id, top_agents[0])
+            scores.append(score)
     else:
         raise ValueError(f"Unknown baseline: {baseline}")
 
@@ -96,7 +117,7 @@ def evaluate_baseline(baseline: str, agent_store: AgentStore, test_questions: li
 def main():
     parser = argparse.ArgumentParser(description="Evaluate baselines for agent search")
     parser.add_argument("baseline", nargs="?", default="all",
-                       choices=["forc", "semantic", "bm25", "rerank", "ltr", "all"],
+                       choices=["forc", "semantic", "bm25", "rerank", "ltr", "set_transformer", "oracle", "all"],
                        help="Baseline to evaluate (default: all)")
 
     args = parser.parse_args()
@@ -106,7 +127,7 @@ def main():
     oracle = TestOracle()
 
     # Available baselines
-    all_baselines = ["forc", "semantic", "bm25", "rerank", "ltr"]
+    all_baselines = ["forc", "semantic", "bm25", "rerank", "ltr", "set_transformer", "oracle"]
     baselines_to_run = [args.baseline] if args.baseline != "all" else all_baselines
     print(baselines_to_run)
 

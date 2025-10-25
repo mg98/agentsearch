@@ -8,10 +8,8 @@ import pandas as pd
 from agentsearch.dataset.agents import Agent, AgentStore
 from typing import List
 
-
 DEBUG = False
 
-# Initialize OpenAI client
 client = OpenAI()
 
 class QuestionList(BaseModel):

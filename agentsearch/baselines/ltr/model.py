@@ -6,7 +6,7 @@ from torch.utils.data import TensorDataset, DataLoader
 import wandb
 
 class LTRModel(nn.Module):
-    def __init__(self, input_dim: int = 7, hidden_dim: int = 64):
+    def __init__(self, input_dim: int = 9, hidden_dim: int = 64):
         super().__init__()
         self.net = nn.Sequential(
             nn.Linear(input_dim, hidden_dim),
@@ -21,9 +21,14 @@ class LTRModel(nn.Module):
         self.register_buffer('feature_max', torch.ones(input_dim))
 
     def normalize(self, x: torch.Tensor) -> torch.Tensor:
-        range_vals = self.feature_max - self.feature_min
+        int_indices = torch.tensor([1, 3, 5], device=x.device)
+        normalized = x.clone()
+
+        range_vals = self.feature_max[int_indices] - self.feature_min[int_indices]
         range_vals = torch.where(range_vals == 0, torch.ones_like(range_vals), range_vals)
-        return (x - self.feature_min) / range_vals
+        normalized[:, int_indices] = (x[:, int_indices] - self.feature_min[int_indices]) / range_vals
+
+        return normalized
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         x = self.normalize(x)
@@ -40,6 +45,8 @@ def feature_vector_to_tensor(fv: FeatureVector) -> torch.Tensor:
         fv.topic_k32_success_rate,
         fv.topic_k8_num_reports,
         fv.topic_k8_success_rate,
+        fv.cosine_similarity_to_k32_centroid,
+        fv.cosine_similarity_to_k8_centroid,
     ], dtype=torch.float32)
 
 

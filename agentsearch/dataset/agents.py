@@ -38,6 +38,9 @@ class Agent:
     citation_count: int
     scholar_url: str
     agent_card: str
+    faculty: str
+    department: str
+    group: str
     papers: list[Paper]
     embedding: np.ndarray
 
@@ -51,6 +54,9 @@ class Agent:
             citation_count=0,
             scholar_url="",
             agent_card="",
+            faculty="",
+            department="",
+            group="",
             papers=[],
             embedding=None,
             _store=None
@@ -124,6 +130,9 @@ class AgentStore:
             citation_count=agents_df.loc[id, 'citation_count'],
             scholar_url=agents_df.loc[id, 'scholar_url'],
             agent_card=agent_card,
+            faculty=agents_df.loc[id, 'faculty'],
+            department=agents_df.loc[id, 'department'],
+            group=agents_df.loc[id, 'group'],
             papers=[],
             embedding=None,
             _store=self._store
