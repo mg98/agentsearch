@@ -119,7 +119,7 @@ class BERTCrossEncoderReranker:
             results.append(RerankResult(
                 agent_id=match.agent.id,
                 original_rank=i,
-                original_score=match.similarity_score,
+                original_score=match.distance,
                 cross_encoder_score=float(score)
             ))
         

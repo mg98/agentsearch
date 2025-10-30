@@ -1,12 +1,12 @@
 import torch
 import torch.nn as nn
-from agentsearch.baselines.ltr.utils import FeatureVector
+from agentsearch.baselines.ltr.utils import FeatureVector, K_VALUES
 from agentsearch.utils.globals import get_torch_device
 from torch.utils.data import TensorDataset, DataLoader
 import wandb
 
 class LTRModel(nn.Module):
-    def __init__(self, input_dim: int = 9, hidden_dim: int = 64):
+    def __init__(self, input_dim: int = 21, hidden_dim: int = 64):
         super().__init__()
         self.net = nn.Sequential(
             nn.Linear(input_dim, hidden_dim),
@@ -21,7 +21,10 @@ class LTRModel(nn.Module):
         self.register_buffer('feature_max', torch.ones(input_dim))
 
     def normalize(self, x: torch.Tensor) -> torch.Tensor:
-        int_indices = torch.tensor([1, 3, 5], device=x.device)
+        int_indices = []
+        for i, k in enumerate(K_VALUES):
+            int_indices.append(3 + i * 3)
+        int_indices = torch.tensor([1] + int_indices, device=x.device)
         normalized = x.clone()
 
         range_vals = self.feature_max[int_indices] - self.feature_min[int_indices]
@@ -37,26 +40,16 @@ class LTRModel(nn.Module):
 
 
 def feature_vector_to_tensor(fv: FeatureVector) -> torch.Tensor:
-    return torch.tensor([
-        fv.cosine_similarity,
-        fv.num_reports,
-        fv.success_rate,
-        fv.topic_k32_num_reports,
-        fv.topic_k32_success_rate,
-        fv.topic_k8_num_reports,
-        fv.topic_k8_success_rate,
-        fv.cosine_similarity_to_k32_centroid,
-        fv.cosine_similarity_to_k8_centroid,
-    ], dtype=torch.float32)
+    return torch.tensor(fv.to_list(), dtype=torch.float32)
 
 
 def train_model(
     x_y_data: list[tuple[FeatureVector, float]],
     epochs: int = 100,
     lr: float = 0.001,
-    batch_size: int = 32,
+    batch_size: int = 64,
     val_split: float = 0.2,
-    patience: int = 10,
+    patience: int = 7,
     use_wandb: bool = True
 ) -> LTRModel:
     device = get_torch_device()

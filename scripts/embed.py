@@ -1,5 +1,6 @@
 import sys
 import torch
+import pandas as pd
 from tqdm import tqdm
 from langchain_chroma import Chroma
 from langchain_core.documents import Document
@@ -46,16 +47,19 @@ def create_paper_collection(agent: Agent):
                 torch.cuda.empty_cache()
 
 def create_question_collection():
+    questions_store.reset_collection()
+
     documents = [Document(
         page_content=row['question'],
         metadata={
-            "agent_id": int(row['agent_id'])
+            "agent_id": int(row['agent_id']) if pd.notna(row['agent_id']) else -1
         }) for _, row in questions_df.iterrows()]
-    
-    BATCH_SIZE = 1024
+
     ids = [str(i) for i in questions_df.index.tolist()]
-    
-    for i in range(0, len(documents), BATCH_SIZE):
+
+    BATCH_SIZE = 1024
+
+    for i in tqdm(range(0, len(documents), BATCH_SIZE), desc="Questions"):
         batch_documents = documents[i:i+BATCH_SIZE]
         batch_ids = ids[i:i+BATCH_SIZE]
         questions_store.add_documents(
@@ -133,7 +137,6 @@ if __name__ == "__main__":
         job_count = 1
     
     if mode == 'questions':
-        questions_store.reset_collection()
         print("Creating question collection...")
         create_question_collection()
     elif mode == 'agents':

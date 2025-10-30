@@ -4,7 +4,7 @@ from chromadb.api.types import QueryResult
 import pandas as pd
 from ast import literal_eval
 import os
-from agentsearch.agent.rag import retrieve, retrieve_with_embedding
+from agentsearch.agent.rag_faiss import retrieve, retrieve_with_embedding
 from agentsearch.agent import qa
 from agentsearch.dataset.questions import questions_store
 import numpy as np
@@ -12,6 +12,8 @@ from agentsearch.dataset.papers import Paper
 from agentsearch.utils.globals import db_location, embeddings
 import warnings
 from agentsearch.dataset.questions import Question
+import faiss
+import json
 
 agents_df = pd.read_csv('data/agents.csv', index_col=0)
 if os.path.exists("papers/pdf"):
@@ -103,7 +105,7 @@ class Agent:
 @dataclass
 class AgentMatch:
     agent: Agent
-    similarity_score: float
+    distance: float
 
 class AgentStore:
     def __init__(self, use_llm_agent_card: bool):
@@ -150,7 +152,6 @@ class AgentStore:
         return agents
     
     def all_from_cluster(self, topic: str, size: int) -> list[Agent]:
-        # Get embedding for the topic
         topic_embedding = embeddings.embed_query(topic)
         
         # Query the agents_store for closest agents using the collection directly
@@ -171,12 +172,12 @@ class AgentStore:
 
     def match_by_qid(self, qid: int, top_k: int = 1) -> list[AgentMatch]:
         """
-        Match a question to the most similar agents based on Agent Card
-        
+        Match a question to the most similar agents using FAISS
+
         Args:
             qid: The ID of the question to match
             top_k: Number of top matches to return
-            
+
         Returns:
             List of agent matches
         """
@@ -187,21 +188,33 @@ class AgentStore:
         if len(question_result['embeddings']) == 0:
             raise ValueError(f"No embedding found for question ID {qid}")
 
-        question_embedding = question_result['embeddings'][0]
-        search_results: QueryResult = self._store._collection.query(
-            query_embeddings=[question_embedding],
-            n_results=top_k,
-            include=['documents', 'distances']
-        )
+        question_embedding = np.array([question_result['embeddings'][0]]).astype('float32')
+
+        collection_name = "agents_with_llm_agent_cards" if self.use_llm_agent_card else "agents_with_human_agent_cards"
+        index_path = os.path.join("faiss", f"{collection_name}.bin")
+        meta_path = os.path.join("faiss", f"{collection_name}_meta.json")
+
+        if not os.path.exists(index_path):
+            raise FileNotFoundError(f"FAISS index not found at {index_path}")
+
+        index = faiss.read_index(index_path)
+
+        with open(meta_path, 'r') as f:
+            metadata = json.load(f)
+
+        distances, indices = index.search(question_embedding, top_k)
+
         matches: list[AgentMatch] = []
-        if search_results['distances'] is not None:
-            for i, distance in enumerate(search_results['distances'][0]):
-                agent_id = search_results['ids'][0][i]
-                agent = self.from_id(int(agent_id))
-                similarity_score = 1 - distance if distance <= 1 else 1 / (1 + distance)
-                matches.append(AgentMatch(
-                    agent=agent,
-                    similarity_score=similarity_score
-                ))
-        
+        for i, idx in enumerate(indices[0]):
+            if idx == -1:
+                continue
+
+            agent_id = int(metadata['ids'][idx])
+            distance = float(distances[0][i])
+            agent = self.from_id(agent_id)
+            matches.append(AgentMatch(
+                agent=agent,
+                distance=distance
+            ))
+
         return matches

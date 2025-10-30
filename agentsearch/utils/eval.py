@@ -1,28 +1,22 @@
 import pandas as pd
-from typing import Callable
 from agentsearch.dataset.questions import Question
-from agentsearch.dataset.agents import Agent, AgentStore, agents_df, num_sources_to_score
+from agentsearch.dataset.agents import Agent, AgentStore, agents_df
 import numpy as np
 from sklearn.metrics import ndcg_score
 from dataclasses import dataclass
 from tqdm import tqdm
 from langchain_chroma import Chroma
-from agentsearch.utils.globals import db_location, embeddings
+from agentsearch.utils.globals import db_location, embeddings, THRESHOLD
+import faiss
+import os
 
 
 def load_data(edges_path: str) -> pd.DataFrame:
     return pd.read_csv(edges_path, dtype={
-        'source_agent': int, 
-        'target_agent': int, 
+        'agent': int, 
         'question': int, 
         'score': float
     })
-
-def load_all_attacks() -> list[tuple[int, pd.DataFrame]]:
-    data = []
-    for i in range(0, 101, 10):
-        data.append((i, load_data(f'data/graph/edges_{i}.csv')))
-    return data
 
 def load_test_questions() -> list[Question]:
     with open('data/test_qids.txt', 'r') as f:
@@ -121,5 +115,28 @@ def compute_question_agent_matrix(questions: list[Question], agents: list[Agent]
             distances = results['distances'][question_idx]
             num_sources = sum(1 for distance in distances if (1 - distance) >= 0.5)
             matrix[question_idx, agent_idx] = num_sources #num_sources_to_score(num_sources)
-            
+
+    return matrix
+
+def compute_question_agent_matrix_faiss(questions: list[Question], agents: list[Agent]) -> np.ndarray:
+    matrix = np.zeros((len(questions), len(agents)))
+    faiss_dir = "faiss"
+
+    for agent_idx, agent in enumerate(tqdm(agents, desc="Processing agents")):
+        collection_name = f"agent_{agent.id}"
+        index_path = os.path.join(faiss_dir, f"{collection_name}.bin")
+
+        if not os.path.exists(index_path):
+            continue
+
+        index = faiss.read_index(index_path)
+
+        query_embeddings = np.array([q.embedding for q in questions]).astype('float32')
+
+        distances, _ = index.search(query_embeddings, 100)
+
+        for question_idx in range(len(questions)):
+            num_sources = sum(1 for distance in distances[question_idx] if distance < THRESHOLD)
+            matrix[question_idx, agent_idx] = num_sources
+
     return matrix

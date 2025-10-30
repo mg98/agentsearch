@@ -160,7 +160,6 @@ def apply_adversarial_attack(graph: GraphData, attack_vol: float) -> GraphData:
 
 @dataclass
 class Interaction:
-    source_agent: Agent
-    target_agent: Agent
+    agent: Agent
     question: Question
     score: float

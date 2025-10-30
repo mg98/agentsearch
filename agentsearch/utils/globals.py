@@ -3,6 +3,7 @@ import torch
 
 db_location = "./chroma_db"
 EMBEDDING_DIM = 768
+THRESHOLD = 0.7
 
 def is_ollama_available():
     try:

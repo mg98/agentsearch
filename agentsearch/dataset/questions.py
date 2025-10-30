@@ -15,15 +15,16 @@ questions_store = Chroma(
 @dataclass
 class Question:
     id: int
-    agent_id: int
+    agent_id: int | None
     question: str
     embedding: np.ndarray
 
     @classmethod
     def from_id(cls, id: int, shallow: bool = False) -> 'Question':
+        agent_id_val = questions_df.loc[id, 'agent_id']
         question = cls(
             id=id,
-            agent_id=int(questions_df.loc[id, 'agent_id']),
+            agent_id=int(agent_id_val) if pd.notna(agent_id_val) else None,
             question=questions_df.loc[id, 'question'],
             embedding=None
         )
@@ -35,9 +36,10 @@ class Question:
     def many(cls, ids: list[int], shallow: bool = False) -> list['Question']:
         questions = []
         for id in ids:
+            agent_id_val = questions_df.loc[id, 'agent_id']
             question = cls(
                 id=id,
-                agent_id=int(questions_df.loc[id, 'agent_id']),
+                agent_id=int(agent_id_val) if pd.notna(agent_id_val) else None,
                 question=questions_df.loc[id, 'question'],
                 embedding=None
             )

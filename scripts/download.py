@@ -4,19 +4,14 @@ import pandas as pd
 import time
 import requests
 from bs4 import BeautifulSoup
-from concurrent.futures import ThreadPoolExecutor
-from functools import partial
 from urllib.parse import urlparse
-from enum import Enum
-from rich.progress import Progress, BarColumn, TextColumn, ProgressColumn
+from rich.progress import Progress, TextColumn, ProgressColumn
 from rich.console import Console
 from rich.text import Text
-from rich.style import Style
 from agentsearch.dataset.papers import Paper
 from agentsearch.apis import s2
 
 headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"}
-
 
 class SegmentedBarColumn(ProgressColumn):
     """A progress bar column that shows different colored segments for successes and failures."""

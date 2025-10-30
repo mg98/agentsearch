@@ -5,40 +5,35 @@ from datetime import datetime
 from openai import OpenAI
 from pydantic import BaseModel, Field
 import pandas as pd
-from agentsearch.dataset.agents import Agent, AgentStore
-from typing import List
 
 DEBUG = False
 
 client = OpenAI()
 
 class QuestionList(BaseModel):
-    questions: List[str] = Field(None, title="Questions")
+    questions: list[str] = Field(None, title="Questions")
 
 question_template = """
-You are a scientist and expert in the following domains: {expertise}.
-
-Generate 10 questions in English language that an expert in these domains would be able to answer.
-Do not enumerate the questions, just list them.
+Generate 5 questions which could have been answered in the paper "{paper}". 
+Make sure to include all context needed. 
+Do not enumerate the questions, just list them line-by-line.
 """
 
-def create_batch_file(agents: list[Agent], filename="data/batch_questions.jsonl"):
-    """Create a JSONL file with batch requests for all categories"""
+def create_batch_file(paper_titles: list[str], filename="data/batch_questions.jsonl"):
+    """Create a JSONL file with batch requests for all papers"""
     tasks = []
-    
-    for agent in agents:
+
+    for idx, paper_title in enumerate(paper_titles):
         task = {
-            "custom_id": f"agent-{agent.id}",
+            "custom_id": f"paper-{idx}",
             "method": "POST",
             "url": "/v1/chat/completions",
             "body": {
-                "model": "gpt-5-mini",
+                "model": "gpt-4o-mini",
                 "messages": [
                     {
                         "role": "user",
-                        "content": question_template.format(
-                            expertise=agent.agent_card
-                        )
+                        "content": question_template.format(paper=paper_title)
                     }
                 ],
                 "response_format": {
@@ -59,16 +54,14 @@ def create_batch_file(agents: list[Agent], filename="data/batch_questions.jsonl"
                         }
                     }
                 },
-                # "temperature": 0.6,
-                # "max_tokens": 1000
             }
         }
         tasks.append(task)
-    
+
     with open(filename, 'w') as f:
         for task in tasks:
             f.write(json.dumps(task) + '\n')
-    
+
     print(f"Created batch file with {len(tasks)} requests: {filename}")
     return filename
 
@@ -122,103 +115,111 @@ def monitor_batch_job(batch_id):
     print(f"Batch job completed with status: {status}")
     return batch_response
 
-def retrieve_batch_results(batch_response):
+def retrieve_batch_results(batch_response, paper_titles: list[str]):
     """Retrieve and process the batch results"""
     if not batch_response.output_file_id:
         print("No output file available")
         return []
-    
+
     print(f"Retrieving results from file: {batch_response.output_file_id}")
-    
-    # Download the results file
+
     file_response = client.files.content(batch_response.output_file_id)
     raw_responses = file_response.text.strip().split('\n')
-    
-    # Process the results
+
     results = []
     for raw_response in raw_responses:
         json_response = json.loads(raw_response)
-        
-        # Extract custom_id to get category info
+
         custom_id = json_response['custom_id']
-        # custom_id format: "category-{idx}-{category.code}"
         parts = custom_id.split('-')
-        agent_id = int(parts[1])
-        
-        # Check if the request was successful
+        paper_idx = int(parts[1])
+
         if json_response.get('error'):
-            print(f"Error for agent {agent_id}: {json_response['error']}")
+            print(f"Error for paper {paper_idx}: {json_response['error']}")
             continue
-        
-        # Extract the questions from the response
+
         response_content = json_response['response']['body']['choices'][0]['message']['content']
         try:
             questions_data = json.loads(response_content)
             questions = questions_data.get('questions', [])
-            
-            # Clean up questions
             questions = [q.replace('\n', '').strip() for q in questions if q.strip()]
-            
+
             results.append({
-                'agent_id': agent_id,
+                'paper_title': paper_titles[paper_idx],
                 'questions': questions
             })
-            
+
         except json.JSONDecodeError as e:
-            print(f"Error parsing response for agent {agent_id}: {e}")
+            print(f"Error parsing response for paper {paper_idx}: {e}")
             continue
-    
+
     return results
 
 def save_results_to_csv(results):
     """Save the results to CSV file"""
+    # Load papers and agents to create mapping
+    papers_df = pd.read_csv('data/papers.csv')
+    agents_df = pd.read_csv('data/agents.csv')
+
+    # Create mappings
+    title_to_author = dict(zip(papers_df['title'], papers_df['author']))
+    name_to_id = dict(zip(agents_df['name'], agents_df['id']))
+
     data = []
-    
+
     for result in results:
-        agent_id = result['agent_id']
+        paper_title = result['paper_title']
         questions = result['questions']
-        
+
+        # Get agent_id from paper title
+        author = title_to_author.get(paper_title)
+        agent_id = name_to_id.get(author) if author else None
+
         for question in questions:
             data.append({
-                'agent_id': agent_id,
+                'agent_id': int(agent_id) if agent_id is not None else None,
                 'question': question
             })
-    
+
     df = pd.DataFrame(data)
-    df.to_csv('data/questions.csv', index=True)
+    df.to_csv('data/questions.csv', index_label='question_id')
     print(f"Saved {len(data)} questions to data/questions.csv")
-    
-    # Print summary
+
+    matched = df['agent_id'].notna().sum()
     print(f"\nSummary:")
-    print(f"- Total agents processed: {len(results)}")
+    print(f"- Total papers processed: {len(results)}")
     print(f"- Total questions generated: {len(data)}")
-    print(f"- Average questions per agent: {len(data) / len(results):.1f}")
+    print(f"- Questions matched to agents: {matched} ({matched/len(data)*100:.1f}%)")
+    print(f"- Average questions per paper: {len(data) / len(results):.1f}")
 
 def main():
     """Main function to orchestrate the batch processing"""
     print("Starting batch question generation...")
-    
-    agent_store = AgentStore(use_llm_agent_card=False)
-    agents = agent_store.all(shallow=True)
-    batch_filename = create_batch_file(agents)
-    
+
+    with open('paper_titles.txt', 'r', encoding='utf-8') as f:
+        paper_titles = [line.strip() for line in f if line.strip()]
+
+    print(f"Loaded {len(paper_titles)} paper titles")
+
+    batch_filename = create_batch_file(paper_titles)
+
     try:
         file_id = upload_batch_file(batch_filename)
         batch_id = create_batch_job(file_id)
         batch_response = monitor_batch_job(batch_id)
-        
+
         if batch_response and batch_response.status == "completed":
-            results = retrieve_batch_results(batch_response)
+            results = retrieve_batch_results(batch_response, paper_titles)
             save_results_to_csv(results)
-            
+
             print("\nBatch processing completed successfully!")
-            
+
         else:
             print("Batch processing failed or was cancelled")
-            
+
     except Exception as e:
         print(f"Error during batch processing: {e}")
-        
+
     finally:
         if os.path.exists(batch_filename):
             os.remove(batch_filename)
