@@ -49,13 +49,13 @@ def evaluate_agent_card_matching():
         # Load the question
         question = Question.from_id(qid)
         print(f"\n{Fore.GREEN}Question {i+1}/{len(test_qids)} (ID: {qid}):{Style.RESET_ALL}")
-        print(f"{Style.BRIGHT}\"{question.question[:100]}{'...' if len(question.question) > 100 else ''}\"{Style.RESET_ALL}")
-        
+        print(f"{Style.BRIGHT}\"{question.text[:100]}{'...' if len(question.text) > 100 else ''}\"{Style.RESET_ALL}")
+
         # Get top-1 matched agent
         print(qid)
-        matches = agent_store.match_by_qid(qid, top_k=1)
+        matches = agent_store.match(question, top_k=1)
         matched_agent = matches[0].agent
-        score = compute_trust_score(matched_agent.count_sources(question.question))
+        score = compute_trust_score(matched_agent.count_sources(question.text))
         scores.append(score) 
         
         print(f"{Fore.YELLOW}Matched Agent:{Style.RESET_ALL} {matched_agent.name}")

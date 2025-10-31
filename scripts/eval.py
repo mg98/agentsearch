@@ -12,6 +12,7 @@ from agentsearch.baselines.rerank import create_trained_reranker, rerank_match, 
 from agentsearch.baselines.forc import create_trained_meta_model, forc_match, FORCData
 from agentsearch.baselines.lambdamart import init_lambdamart, lambdamart_match, LambdaMARTData
 from agentsearch.baselines.ltr import init_ltr, ltr_match, LTRData
+from agentsearch.baselines.regressive_ltr import init_regressive_ltr, regressive_ltr_match
 from agentsearch.baselines.set_transformer import init_set_transformer, set_transformer_match, SetTransformerData
 
 def evaluate_baseline(baseline: str, agent_store: AgentStore, test_questions: list[Question],
@@ -23,7 +24,7 @@ def evaluate_baseline(baseline: str, agent_store: AgentStore, test_questions: li
         data: list[FORCData] = []
         for _, row in reports.iterrows():
             question = Question.from_id(row['question'], shallow=True)
-            data.append((question.question, row['agent'], int(row['score'] > 0)))
+            data.append((question.text, row['agent'], int(row['score'] > 0)))
         
         meta_model, trainer = create_trained_meta_model(data)
         for question in test_questions:
@@ -33,14 +34,18 @@ def evaluate_baseline(baseline: str, agent_store: AgentStore, test_questions: li
 
     elif baseline == "semantic":
         query_times = []
-        for question in test_questions:
+        for question in tqdm(test_questions[:100], desc="Evaluating Semantic"):
             start_time = time.time()
-            top_agents: list[Agent] = semantic_match(agent_store, question, top_k=8)
+            top_agents: list[Agent] = semantic_match(agent_store, question, top_k=1)
             query_time = (time.time() - start_time) * 1000
             query_times.append(query_time)
 
-            score = oracle.get_score(question.id, top_agents[0].id)
+
+            top_agent = agent_store.from_id(top_agents[0].id, shallow=False)
+            score = top_agent.grade(question)
             scores.append(score)
+
+        print(scores)
 
         avg_query_time = np.mean(query_times)
         print(f"  Semantic: Avg query time: {avg_query_time:.2f}ms ({len(query_times)} queries)")
@@ -57,7 +62,7 @@ def evaluate_baseline(baseline: str, agent_store: AgentStore, test_questions: li
         for _, row in reports.iterrows():
             question = Question.from_id(row['question'], shallow=True)
             target_agent = agent_store.from_id(row['agent'], shallow=True)
-            data.append((question.question, target_agent.agent_card, row['score']))
+            data.append((question.text, target_agent.agent_card, row['score']))
 
         reranker = create_trained_reranker(data)
         for question in test_questions:
@@ -86,6 +91,31 @@ def evaluate_baseline(baseline: str, agent_store: AgentStore, test_questions: li
 
         avg_query_time = np.mean(query_times)
         print(f"  LTR: Avg query time: {avg_query_time:.2f}ms ({len(query_times)} queries)")
+
+    elif baseline == "regressive_ltr":
+        data: list[LTRData] = []
+        for _, row in reports.iterrows():
+            agent = agent_store.from_id(int(row['agent']), shallow=False)
+            question = Question.from_id(int(row['question']), shallow=False)
+            data.append((agent, question, row['score']))
+
+        print("Init Regressive LTR model...")
+        cluster_data, model = init_regressive_ltr(data)
+        query_times = []
+        for question in tqdm(test_questions[:100], desc="Evaluating Regressive LTR"):
+            start_time = time.time()
+            top_agents: list[Agent] = regressive_ltr_match(data, cluster_data, model, agent_store, question)
+            query_time = (time.time() - start_time) * 1000
+            query_times.append(query_time)
+
+            top_agent = agent_store.from_id(top_agents[0].id, shallow=False)
+            score = top_agent.grade(question)
+            scores.append(score)
+
+        print(scores)
+
+        avg_query_time = np.mean(query_times)
+        print(f"  Regressive LTR: Avg query time: {avg_query_time:.2f}ms ({len(query_times)} queries)")
 
     elif baseline == "q_semantic":
         for question in tqdm(test_questions[:100], desc="Evaluating Q-Semantic"):
@@ -164,7 +194,7 @@ def evaluate_baseline(baseline: str, agent_store: AgentStore, test_questions: li
 def main():
     parser = argparse.ArgumentParser(description="Evaluate baselines for agent search")
     parser.add_argument("baseline", nargs="?", default="all",
-                       choices=["forc", "semantic", "bm25", "rerank", "ltr", "set_transformer", "q_semantic", "oracle", "topk_oracle", "all"],
+                       choices=["forc", "semantic", "bm25", "rerank", "ltr", "regressive_ltr", "set_transformer", "q_semantic", "oracle", "topk_oracle", "all"],
                        help="Baseline to evaluate (default: all)")
 
     args = parser.parse_args()
@@ -174,17 +204,17 @@ def main():
     oracle = TestOracle()
 
     # Available baselines
-    all_baselines = ["forc", "semantic", "bm25", "rerank", "ltr", "set_transformer", "q_semantic", "oracle", "topk_oracle"]
+    all_baselines = ["forc", "semantic", "bm25", "rerank", "ltr", "regressive_ltr", "set_transformer", "q_semantic", "oracle", "topk_oracle"]
     baselines_to_run = [args.baseline] if args.baseline != "all" else all_baselines
     print(baselines_to_run)
 
     # Evaluate selected baselines
-    reports = load_data("data/reports.csv")
+    reports = load_data("data/new_reports.csv")
     # Group reports by 'question', shuffle groups, select first 10000 groups, then combine
     question_groups = list(reports.groupby('question'))
     np.random.seed(42)
     np.random.shuffle(question_groups)
-    selected_groups = question_groups[:1000]
+    selected_groups = question_groups
     reports = pd.concat([group for _, group in selected_groups], ignore_index=True)
     
     for baseline in baselines_to_run:

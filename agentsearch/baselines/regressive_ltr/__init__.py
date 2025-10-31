@@ -1,20 +1,19 @@
 from agentsearch.dataset.agents import AgentStore, Agent
 from agentsearch.dataset.questions import Question
-from agentsearch.baselines.ltr.utils import (
+from agentsearch.baselines.regressive_ltr.utils import (
     ClusterData,
     compile_feature_vector,
     precompute_question_context,
     precompute_agent_histories
 )
-from agentsearch.baselines.ltr.model import LTRModel, train_model, feature_vector_to_tensor
+from agentsearch.baselines.regressive_ltr.model import RegressiveLTRModel, train_model, feature_vector_to_tensor
 from agentsearch.utils.globals import get_torch_device
 import torch
 from tqdm import tqdm
-import random
 
 LTRData = tuple[Agent, Question, float]
 
-def init_ltr(data: list[LTRData]) -> tuple[ClusterData, LTRModel]:
+def init_regressive_ltr(data: list[LTRData]) -> tuple[ClusterData, RegressiveLTRModel]:
     questions = list(map(lambda d: d[1], data))
     print("Clustering questions...")
     cluster_data = ClusterData(questions)
@@ -36,7 +35,7 @@ def init_ltr(data: list[LTRData]) -> tuple[ClusterData, LTRModel]:
     print("Model trained")
     return cluster_data, model
 
-def ltr_match(history: list[LTRData], cluster_data: ClusterData, model: LTRModel, agent_store: AgentStore, question: Question) -> list[Agent]:
+def regressive_ltr_match(history: list[LTRData], cluster_data: ClusterData, model: RegressiveLTRModel, agent_store: AgentStore, question: Question) -> list[Agent]:
     matches = agent_store.match(question, top_k=8)
     agents = list(map(lambda m: m.agent, matches))
 

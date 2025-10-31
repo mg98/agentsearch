@@ -297,10 +297,10 @@ def create_trained_reranker(data: list[RerankData]) -> BERTCrossEncoderReranker:
     return reranker
 
 def rerank_match(reranker: BERTCrossEncoderReranker, agent_store: AgentStore, question: Question) -> list[Agent]:
-    initial_matches = agent_store.match_by_qid(question.id, top_k=100)
+    initial_matches = agent_store.match(question, top_k=100)
     reranked_agents = reranker.rerank_with_agents(
         agent_store=agent_store,
-        query=question.question,
+        query=question.text,
         agent_matches=initial_matches,
     )
     return reranked_agents

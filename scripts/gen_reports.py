@@ -6,6 +6,8 @@ from tqdm import tqdm
 import argparse
 import csv
 from itertools import cycle
+from concurrent.futures import ThreadPoolExecutor, as_completed
+import threading
 
 init(autoreset=True)
 random.seed(42)
@@ -41,7 +43,7 @@ if __name__ == '__main__':
     random.shuffle(all_questions)
 
     test_questions = all_questions[:1000]
-    questions = all_questions[1000:]
+    questions = all_questions[1000:11000]
 
     if args.job_id == 0:
         test_qids = [str(q.id) for q in test_questions]
@@ -49,22 +51,34 @@ if __name__ == '__main__':
             f.write(','.join(test_qids))
         print(f"{Fore.CYAN}Wrote {len(test_qids)} test question IDs to data/test_qids.txt{Style.RESET_ALL}")
 
-    reports_file = f'data/reports_{args.job_id}.csv'
+    reports_file = f'data/new_reports_{args.job_id}.csv'
     questions = [q for idx, q in enumerate(questions) if idx % args.job_count == args.job_id]
 
-    for question in tqdm(questions, desc="Generating reports"):
-        # Get the next color from the cycle for this question
+    file_lock = threading.Lock()
+
+    def process_question(question: Question):
         question_color = next(QUESTION_COLORS)
-        
-        matches = agent_store.match_by_qid(question.id, K_MATCHES)
+        matches = agent_store.match(question, K_MATCHES)
+
         for match in matches:
             trust_score = match.agent.grade(question)
             print(f"{question_color}Asking question {question.id} to {match.agent.name}: {trust_score}{Style.RESET_ALL}")
             report_row = [match.agent.id, question.id, trust_score]
 
-            with open(reports_file, mode='a', newline='') as f:
-                writer = csv.writer(f)
-                writer.writerow(report_row)
+            with file_lock:
+                with open(reports_file, mode='a', newline='') as f:
+                    writer = csv.writer(f)
+                    writer.writerow(report_row)
 
             if trust_score > 0:
                 break
+
+    max_workers = 10
+    with ThreadPoolExecutor(max_workers=max_workers) as executor:
+        futures = [executor.submit(process_question, question) for question in questions]
+
+        for future in tqdm(as_completed(futures), total=len(questions), desc="Generating reports"):
+            try:
+                future.result()
+            except Exception as e:
+                print(f"{Fore.RED}Error processing question: {e}{Style.RESET_ALL}")

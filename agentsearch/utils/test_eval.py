@@ -11,7 +11,7 @@ def test_oracle():
     
     # Pick an arbitrary question
     question = test_questions[12]
-    print(f"Testing with question {question.id}: {question.question}")
+    print(f"Testing with question {question.id}: {question.text}")
     
     # Get Oracle's top agents for this question
     oracle_top_agents = oracle.match(agent_store, question)

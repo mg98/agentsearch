@@ -399,7 +399,7 @@ def set_transformer_match(
     device = get_torch_device()
     model.eval()
 
-    matches = agent_store.match_by_qid(question.id, top_k=8)
+    matches = agent_store.match(question, top_k=8)
     agents = list(map(lambda m: m.agent, matches))
 
     agent_scores = []

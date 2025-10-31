@@ -14,6 +14,52 @@ import warnings
 from agentsearch.dataset.questions import Question
 import faiss
 import json
+from langchain_openai import ChatOpenAI
+from langchain_core.prompts import ChatPromptTemplate
+
+SCORING_SYSTEM_PROMPT = """Given a user request and a search result, you must provide a score on an
+integer scale of 0 to 3 with the following meanings:
+3 = key, this search result contains relevant, diverse, informative and
+correct answers to the user request; the user request can be fulfilled by
+relying only on this search result.
+2 = high relevance, this search result contains relevant, informative and
+correct answers to the user request; however, it does not span diverse
+perspectives, and including another perspective can help with a better
+answer to the user request.
+1 = minimal relevance, this search result contains relevant answers to the
+user request. However, it is impossible to answer the user request based
+solely on the search result.
+0 = not relevant, this search result does not contain any relevant answer
+to the user request."""
+
+SCORING_USER_TEMPLATE = """Assume that you are collecting all the relevant search results to write a
+final answer for the user request.
+User Request:
+A user typed the following request.
+{request}
+Result:
+Consider the following search result:
+—BEGIN Search Result CONTENT—
+{result}
+—END Search Result CONTENT—
+Instructions:
+Split this problem into steps:
+Consider the underlying intent of the user request.
+Measure how well the content matches a likely intent of the request (M)
+Measure how trustworthy the search result is (T).
+Consider the aspects above and the relative importance of each, and
+decide on a final score (O).
+Produce a JSON of scores without providing any reasoning. Example:{{"M": 2, "T": 1,"O": 1}}
+Results:"""
+
+ANSWER_TEMPLATE = """You are an AI assistant that answers questions based solely on the provided context.
+
+Context:
+{context}
+
+Question: {query}
+
+Answer the question based only on the information provided in the context above. If the context does not contain enough information to answer the question, say so clearly."""
 
 agents_df = pd.read_csv('data/agents.csv', index_col=0)
 if os.path.exists("papers/pdf"):
@@ -81,14 +127,19 @@ class Agent:
         self.papers = [Paper(id=paper_id, agent_id=self.id) for paper_id in paper_ids]
 
 
-    def ask(self, question: str) -> str:
+    def ask_string(self, question: str) -> str:
         sources = retrieve(self.id, question)
-        sources_text = "\n".join([f"- {source.page_content}" for source in sources])
         if len(sources) == 0:
-            sources_text = "No sources found"
-            return "I don't know" # hotfix to make evaluation more efficient
-        answer = qa.chain.invoke({"sources": sources_text, "question": question})
-        return answer
+            return "I don't know"
+
+        context = "\n\n".join([source.page_content for source in sources])
+
+        llm = ChatOpenAI(model="gpt-4o-mini", temperature=0)
+        prompt = ChatPromptTemplate.from_template(ANSWER_TEMPLATE)
+        chain = prompt | llm
+
+        response = chain.invoke({"context": context, "query": question})
+        return response.content
     
     def count_sources(self, question: str) -> int:
         sources = retrieve(self.id, question)
@@ -98,9 +149,40 @@ class Agent:
         sources = retrieve(self.id, question, k=1)
         return len(sources) > 0
 
-    def grade(self, question: Question) -> float:
+    def ez_grade(self, question: Question) -> float:
         sources = retrieve_with_embedding(self.id, question.embedding, k=100)
         return num_sources_to_score(len(sources))
+
+    def ask(self, question: Question) -> str:
+        sources = retrieve_with_embedding(self.id, question.embedding)
+        if len(sources) == 0:
+            return "I don't know"
+
+        context = "\n\n".join([source.page_content for source in sources])
+
+        llm = ChatOpenAI(model="gpt-4o-mini", temperature=0)
+        prompt = ChatPromptTemplate.from_template(ANSWER_TEMPLATE)
+        chain = prompt | llm
+
+        response = chain.invoke({"context": context, "query": question.text})
+        return response.content
+
+    def grade(self, question: Question) -> int:
+        answer = self.ask(question)
+
+        llm = ChatOpenAI(model="gpt-4o-mini", temperature=0)
+        scoring_messages = [
+            {"role": "system", "content": SCORING_SYSTEM_PROMPT},
+            {"role": "user", "content": SCORING_USER_TEMPLATE.format(request=question.text, result=answer)}
+        ]
+
+        response = llm.invoke(scoring_messages)
+        try:
+            scores = json.loads(response.content)
+            return scores.get("O", 0)
+        except json.JSONDecodeError:
+            warnings.warn(f"Failed to parse scores for agent {self.id} and question {question.id}")
+            return 0
 
 @dataclass
 class AgentMatch:
@@ -170,25 +252,18 @@ class AgentStore:
         
         return agents
 
-    def match_by_qid(self, qid: int, top_k: int = 1) -> list[AgentMatch]:
+    def match(self, question: Question, top_k: int = 1) -> list[AgentMatch]:
         """
         Match a question to the most similar agents using FAISS
 
         Args:
-            qid: The ID of the question to match
+            question: The Question object to match
             top_k: Number of top matches to return
 
         Returns:
             List of agent matches
         """
-        question_result = questions_store._collection.get(
-            ids=[str(qid)],
-            include=['embeddings']
-        )
-        if len(question_result['embeddings']) == 0:
-            raise ValueError(f"No embedding found for question ID {qid}")
-
-        question_embedding = np.array([question_result['embeddings'][0]]).astype('float32')
+        question_embedding = np.array([question.embedding]).astype('float32')
 
         collection_name = "agents_with_llm_agent_cards" if self.use_llm_agent_card else "agents_with_human_agent_cards"
         index_path = os.path.join("faiss", f"{collection_name}.bin")

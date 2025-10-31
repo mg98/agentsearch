@@ -16,7 +16,7 @@ questions_store = Chroma(
 class Question:
     id: int
     agent_id: int | None
-    question: str
+    text: str
     embedding: np.ndarray
 
     @classmethod
@@ -25,7 +25,7 @@ class Question:
         question = cls(
             id=id,
             agent_id=int(agent_id_val) if pd.notna(agent_id_val) else None,
-            question=questions_df.loc[id, 'question'],
+            text=questions_df.loc[id, 'question'],
             embedding=None
         )
         if not shallow:
@@ -40,7 +40,7 @@ class Question:
             question = cls(
                 id=id,
                 agent_id=int(agent_id_val) if pd.notna(agent_id_val) else None,
-                question=questions_df.loc[id, 'question'],
+                text=questions_df.loc[id, 'question'],
                 embedding=None
             )
             questions.append(question)

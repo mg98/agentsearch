@@ -303,11 +303,8 @@ def create_trained_meta_model(data: list[FORCData]) -> tuple[FORCMetaModel, FORC
     return model, trainer
 
 def forc_match(model: FORCMetaModel, trainer: FORCTrainer, agent_store: AgentStore, question: Question) -> list[Agent]:
-    # matches = agent_store.match_by_qid(question.id, top_k=8)
-    # inputs = [(question.id, match.agent.id) for match in matches]
-    # agents = agent_store.all(shallow=True)
-    agents = [match.agent for match in agent_store.match_by_qid(question.id, top_k=8)]
-    inputs = [(question.question, agent.id) for agent in agents]
+    agents = [match.agent for match in agent_store.match(question, top_k=8)]
+    inputs = [(question.text, agent.id) for agent in agents]
 
     # Process agents in batches for this question
     question_pred_probs = []
