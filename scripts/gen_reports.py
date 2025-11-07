@@ -1,6 +1,6 @@
 import random
 from colorama import init, Fore, Style
-from agentsearch.dataset.agents import Agent, AgentStore
+from agentsearch.dataset.agents import Agent
 from agentsearch.dataset.questions import Question
 from tqdm import tqdm
 import argparse
@@ -35,8 +35,7 @@ if __name__ == '__main__':
 
     print(f"{Fore.CYAN}Generating reports for job {args.job_id+1} of {args.job_count}{Style.RESET_ALL}")
 
-    agent_store = AgentStore(use_llm_agent_card=False)
-    all_agents = agent_store.all(shallow=True)
+    all_agents = Agent.all(collection="agents")
     random.shuffle(all_agents)
 
     all_questions = Question.all()
@@ -58,23 +57,21 @@ if __name__ == '__main__':
 
     def process_question(question: Question):
         question_color = next(QUESTION_COLORS)
-        matches = agent_store.match(question, K_MATCHES)
+        matches = Agent.match(question, K_MATCHES, collection="agents")
 
         for match in matches:
-            trust_score = match.agent.grade(question)
-            print(f"{question_color}Asking question {question.id} to {match.agent.name}: {trust_score}{Style.RESET_ALL}")
-            report_row = [match.agent.id, question.id, trust_score]
+            score = match.agent.grade(question)
+            print(f"{question_color}Asking question {question.id} to {match.agent.name}: {score}{Style.RESET_ALL}")
 
             with file_lock:
                 with open(reports_file, mode='a', newline='') as f:
                     writer = csv.writer(f)
-                    writer.writerow(report_row)
+                    writer.writerow([match.agent.id, question.id, score])
 
-            if trust_score > 0:
+            if score > 0:
                 break
 
-    max_workers = 10
-    with ThreadPoolExecutor(max_workers=max_workers) as executor:
+    with ThreadPoolExecutor(max_workers=10) as executor:
         futures = [executor.submit(process_question, question) for question in questions]
 
         for future in tqdm(as_completed(futures), total=len(questions), desc="Generating reports"):

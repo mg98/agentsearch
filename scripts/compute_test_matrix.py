@@ -1,15 +1,15 @@
-from agentsearch.utils.eval import compute_question_agent_matrix_faiss, load_test_questions
-from agentsearch.dataset.agents import AgentStore
+from agentsearch.utils.eval import compute_question_agent_matrix, load_test_questions
+from agentsearch.dataset.agents import Agent
 import numpy as np
 
 if __name__ == "__main__":
     print("Loading questions...")
     questions = load_test_questions()
     print("Loading agents...")
-    agents = AgentStore(use_llm_agent_card=False).all(shallow=True)
+    agents = Agent.all()
 
     print("Computing matrix...")
-    matrix = compute_question_agent_matrix_faiss(questions, agents)
+    matrix = compute_question_agent_matrix(questions, agents)
 
     print("Saving raw matrix to disk...")
     np.save('data/test_matrix_raw.npy', matrix)

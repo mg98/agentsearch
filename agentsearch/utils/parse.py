@@ -49,7 +49,7 @@ def chunk_pdf(pdf_path, min_words=30, alphabetic_threshold=0.8) -> list[str]:
         for page in doc:
             blocks = page.get_text("blocks")
             for block in blocks:
-                text = block[4].strip()  # Text content of the block
+                text = block[4].strip()
                 if not text:
                     continue
                 if is_reference(text):

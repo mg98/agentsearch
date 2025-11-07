@@ -1,62 +1,74 @@
 import json
 import time
 import os
+from tqdm import tqdm
 from datetime import datetime
 from openai import OpenAI
 from pydantic import BaseModel, Field
 import pandas as pd
+from agentsearch.dataset.agents import Agent
+from agentsearch.dataset.papers import Paper
+from concurrent.futures import ProcessPoolExecutor
+from functools import partial
 
 DEBUG = False
 
 client = OpenAI()
 
-class QuestionList(BaseModel):
-    questions: list[str] = Field(None, title="Questions")
+class Question(BaseModel):
+    question: str = Field(None, title="Question")
 
 question_template = """
-Generate 5 questions which could have been answered in the paper "{paper}". 
-Make sure to include all context needed. 
-Do not enumerate the questions, just list them line-by-line.
+Generate one question which could have been answered by the following text:
+<TEXT>
+{paper}
+</TEXT>
+Make sure to include all context needed to answer the question.
 """
 
-def create_batch_file(paper_titles: list[str], filename="data/batch_questions.jsonl"):
-    """Create a JSONL file with batch requests for all papers"""
-    tasks = []
-
-    for idx, paper_title in enumerate(paper_titles):
-        task = {
-            "custom_id": f"paper-{idx}",
-            "method": "POST",
-            "url": "/v1/chat/completions",
-            "body": {
-                "model": "gpt-4o-mini",
-                "messages": [
-                    {
-                        "role": "user",
-                        "content": question_template.format(paper=paper_title)
+def _make_task(paper):
+    return {
+        "custom_id": f"paper-{paper.id}",
+        "method": "POST",
+        "url": "/v1/chat/completions",
+        "body": {
+            "model": "gpt-4.1-nano",
+            "temperature": 0,
+            "messages": [
+                {
+                    "role": "user",
+                    "content": question_template.format(paper=paper.extract_text())
+                }
+            ],
+            "response_format": {
+                "type": "json_schema",
+                "json_schema": {
+                    "name": "Question",
+                    "strict": True,
+                    "schema": {
+                        "type": "object",
+                        "properties": {
+                            "question": {
+                                "type": "string"
+                            }
+                        },
+                        "required": ["question"],
+                        "additionalProperties": False
                     }
-                ],
-                "response_format": {
-                    "type": "json_schema",
-                    "json_schema": {
-                        "name": "QuestionList",
-                        "strict": True,
-                        "schema": {
-                            "type": "object",
-                            "properties": {
-                                "questions": {
-                                    "type": "array",
-                                    "items": {"type": "string"}
-                                }
-                            },
-                            "required": ["questions"],
-                            "additionalProperties": False
-                        }
-                    }
-                },
-            }
+                }
+            },
         }
-        tasks.append(task)
+    }
+
+def create_batch_file(papers: list[Paper], filename="data/batch_questions.jsonl"):
+    """Create a JSONL file with batch requests for all papers (using multicore processing)"""
+    from multiprocessing import cpu_count
+
+    tasks = []
+    with ProcessPoolExecutor(max_workers=cpu_count()) as executor:
+        # tqdm does not natively handle as_completed, but we can wrap the enumerate with tqdm for progress bar
+        task_iter = executor.map(_make_task, papers)
+        tasks = list(tqdm(task_iter, total=len(papers), desc="Creating batch requests"))
 
     with open(filename, 'w') as f:
         for task in tasks:
@@ -97,7 +109,7 @@ def monitor_batch_job(batch_id):
     
     status = "validating"
     while status not in ("completed", "failed", "cancelled", "expired"):
-        time.sleep(30)  # Wait 60 seconds between checks
+        time.sleep(30)  # Wait 30 seconds between checks
         
         batch_response = client.batches.retrieve(batch_id)
         status = batch_response.status
@@ -115,7 +127,7 @@ def monitor_batch_job(batch_id):
     print(f"Batch job completed with status: {status}")
     return batch_response
 
-def retrieve_batch_results(batch_response, paper_titles: list[str]):
+def retrieve_batch_results(batch_response):
     """Retrieve and process the batch results"""
     if not batch_response.output_file_id:
         print("No output file available")
@@ -132,7 +144,7 @@ def retrieve_batch_results(batch_response, paper_titles: list[str]):
 
         custom_id = json_response['custom_id']
         parts = custom_id.split('-')
-        paper_idx = int(parts[1])
+        paper_idx = parts[1]
 
         if json_response.get('error'):
             print(f"Error for paper {paper_idx}: {json_response['error']}")
@@ -140,14 +152,16 @@ def retrieve_batch_results(batch_response, paper_titles: list[str]):
 
         response_content = json_response['response']['body']['choices'][0]['message']['content']
         try:
-            questions_data = json.loads(response_content)
-            questions = questions_data.get('questions', [])
-            questions = [q.replace('\n', '').strip() for q in questions if q.strip()]
+            question_data = json.loads(response_content)
+            question = question_data.get('question', '').replace('\n', ' ').strip()
 
-            results.append({
-                'paper_title': paper_titles[paper_idx],
-                'questions': questions
-            })
+            if question:
+                paper = Paper.from_id(paper_idx)
+                results.append({
+                    'agent_id': paper.agent_id,
+                    'paper_id': paper.id,
+                    'question': question
+                })
 
         except json.JSONDecodeError as e:
             print(f"Error parsing response for paper {paper_idx}: {e}")
@@ -157,51 +171,26 @@ def retrieve_batch_results(batch_response, paper_titles: list[str]):
 
 def save_results_to_csv(results):
     """Save the results to CSV file"""
-    # Load papers and agents to create mapping
-    papers_df = pd.read_csv('data/papers.csv')
-    agents_df = pd.read_csv('data/agents.csv')
-
-    # Create mappings
-    title_to_author = dict(zip(papers_df['title'], papers_df['author']))
-    name_to_id = dict(zip(agents_df['name'], agents_df['id']))
-
-    data = []
-
-    for result in results:
-        paper_title = result['paper_title']
-        questions = result['questions']
-
-        # Get agent_id from paper title
-        author = title_to_author.get(paper_title)
-        agent_id = name_to_id.get(author) if author else None
-
-        for question in questions:
-            data.append({
-                'agent_id': int(agent_id) if agent_id is not None else None,
-                'question': question
-            })
-
-    df = pd.DataFrame(data)
-    df.to_csv('data/questions.csv', index_label='question_id')
-    print(f"Saved {len(data)} questions to data/questions.csv")
+    df = pd.DataFrame(results)
+    df.to_csv('data/questions.csv', index_label='question_id', escapechar='\\')
+    print(f"Saved {len(results)} questions to data/questions.csv")
 
     matched = df['agent_id'].notna().sum()
     print(f"\nSummary:")
     print(f"- Total papers processed: {len(results)}")
-    print(f"- Total questions generated: {len(data)}")
-    print(f"- Questions matched to agents: {matched} ({matched/len(data)*100:.1f}%)")
-    print(f"- Average questions per paper: {len(data) / len(results):.1f}")
+    print(f"- Total questions generated: {len(results)}")
+    print(f"- Questions matched to agents: {matched} ({matched/len(results)*100:.1f}%)")
 
 def main():
     """Main function to orchestrate the batch processing"""
     print("Starting batch question generation...")
 
-    with open('paper_titles.txt', 'r', encoding='utf-8') as f:
-        paper_titles = [line.strip() for line in f if line.strip()]
+    agents = Agent.all()
+    papers: list[Paper] = [paper for agent in agents for paper in agent.papers]
 
-    print(f"Loaded {len(paper_titles)} paper titles")
+    print(f"Loaded {len(papers)} papers")
 
-    batch_filename = create_batch_file(paper_titles)
+    batch_filename = create_batch_file(papers, filename="data/batch_questions.jsonl")
 
     try:
         file_id = upload_batch_file(batch_filename)
@@ -209,7 +198,7 @@ def main():
         batch_response = monitor_batch_job(batch_id)
 
         if batch_response and batch_response.status == "completed":
-            results = retrieve_batch_results(batch_response, paper_titles)
+            results = retrieve_batch_results(batch_response)
             save_results_to_csv(results)
 
             print("\nBatch processing completed successfully!")
@@ -222,8 +211,29 @@ def main():
 
     finally:
         if os.path.exists(batch_filename):
-            os.remove(batch_filename)
+            # os.remove(batch_filename)
             print(f"Cleaned up batch file: {batch_filename}")
+
+def retrieve_batches_and_save():
+    batch_ids = [
+        "batch_690c8bd326a481909d594582607ad55a",
+        "batch_690c8f5549088190b8d63c8ae1871584",
+        "batch_690c975702a88190a3e1ce938b900672",
+        "batch_690c9b72b4b881908dfac85a3e868470",
+        "batch_690ca1529370819090bb052265437136",
+        "batch_690caafb790081908545c48787014f67",
+        "batch_690cb142020481909b964b6aa26313b7",
+        "batch_690cb76782a08190a954a68b3d9f27e2",
+    ]
+    results = []
+    for batch_id in batch_ids:
+        batch_response = monitor_batch_job(batch_id)
+        assert batch_response.status == "completed"
+        new_results = retrieve_batch_results(batch_response)
+        results.extend(new_results)
+
+    save_results_to_csv(results)
+    print("\nBatch processing completed successfully!")
 
 if __name__ == "__main__":
     main()

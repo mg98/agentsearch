@@ -1,13 +1,11 @@
 import pandas as pd
 from agentsearch.dataset.questions import Question
-from agentsearch.dataset.agents import Agent, AgentStore, agents_df
+from agentsearch.dataset.agents import Agent, agents_df
 import numpy as np
 from sklearn.metrics import ndcg_score
 from dataclasses import dataclass
 from tqdm import tqdm
-from langchain_chroma import Chroma
-from agentsearch.utils.globals import db_location, embeddings, THRESHOLD
-import faiss
+from agentsearch.utils.globals import THRESHOLD
 import os
 
 
@@ -21,7 +19,7 @@ def load_data(edges_path: str) -> pd.DataFrame:
 def load_test_questions() -> list[Question]:
     with open('data/test_qids.txt', 'r') as f:
         test_qids = [int(qid.strip()) for qid in f.read().split(',')]
-    return Question.many(test_qids, shallow=False)
+    return Question.many(test_qids)
 
 class TestOracle:
     """
@@ -62,12 +60,12 @@ class TestOracle:
         top_agent_indices = np.argsort(question_scores)[::-1][:top_k]
         return agents_df.iloc[top_agent_indices].index.tolist()
 
-    def rank_agents(self, agent_store: AgentStore, question: Question, top_k=8) -> list[Agent]:
+    def rank_agents(self, question: Question, top_k=8, collection: str = "agents") -> list[Agent]:
         """
         Wrapper around `rank_agent_ids` that returns `Agent` objects.
         """
         agent_ids = self.rank_agent_ids(question.id, top_k)
-        return list(map(lambda id: agent_store.from_id(id, shallow=True), agent_ids))
+        return list(map(lambda id: Agent.from_id(id, collection=collection), agent_ids))
 
 @dataclass
 class EvalMetrics:
@@ -96,43 +94,19 @@ def compute_metrics(match_results: list[MatchResult]) -> EvalMetrics:
 
 
 def compute_question_agent_matrix(questions: list[Question], agents: list[Agent]) -> np.ndarray:
+    from agentsearch.utils.vector_store import load_index
+
     matrix = np.zeros((len(questions), len(agents)))
-    for agent_idx, agent in enumerate(tqdm(agents, desc="Processing agents")):
-        vector_store = Chroma(
-            collection_name=f"agent_{agent.id}",
-            persist_directory=db_location,
-            embedding_function=embeddings
-        )
-        results = vector_store._collection.query(
-            query_embeddings=np.array([q.embedding for q in questions]),
-            n_results=100,
-            include=['distances']
-        )
-
-        # Fill matrix with number of results for each question-agent pair
-        for question_idx in range(len(questions)):
-            # Filter results by similarity threshold (1 - distance >= 0.5)
-            distances = results['distances'][question_idx]
-            num_sources = sum(1 for distance in distances if (1 - distance) >= 0.5)
-            matrix[question_idx, agent_idx] = num_sources #num_sources_to_score(num_sources)
-
-    return matrix
-
-def compute_question_agent_matrix_faiss(questions: list[Question], agents: list[Agent]) -> np.ndarray:
-    matrix = np.zeros((len(questions), len(agents)))
-    faiss_dir = "faiss"
 
     for agent_idx, agent in enumerate(tqdm(agents, desc="Processing agents")):
         collection_name = f"agent_{agent.id}"
-        index_path = os.path.join(faiss_dir, f"{collection_name}.bin")
 
-        if not os.path.exists(index_path):
+        try:
+            index, _ = load_index(collection_name)
+        except FileNotFoundError:
             continue
 
-        index = faiss.read_index(index_path)
-
         query_embeddings = np.array([q.embedding for q in questions]).astype('float32')
-
         distances, _ = index.search(query_embeddings, 100)
 
         for question_idx in range(len(questions)):

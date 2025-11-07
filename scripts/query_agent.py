@@ -2,7 +2,7 @@ import json
 from colorama import Fore, Style
 from langchain_openai import ChatOpenAI
 from langchain_core.prompts import ChatPromptTemplate
-from agentsearch.agent.rag_faiss import retrieve
+from agentsearch.agent.rag import retrieve
 
 SCORING_SYSTEM_PROMPT = """Given a user request and a search result, you must provide a score on an
 integer scale of 0 to 3 with the following meanings:

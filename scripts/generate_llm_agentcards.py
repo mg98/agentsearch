@@ -6,7 +6,7 @@ from tqdm import tqdm
 import openai
 from openai import OpenAI
 import tiktoken
-from agentsearch.dataset.agents import Agent, AgentStore, agents_df
+from agentsearch.dataset.agents import Agent, agents_df
 
 
 def get_agent_publications(agent: Agent) -> str:
@@ -69,7 +69,7 @@ def create_batch_request(agent_id: str, publications: str) -> dict:
                 {"role": "system", "content": system_message},
                 {"role": "user", "content": publications}
             ],
-            "temperature": 0.3,
+            "temperature": 0,
             "max_tokens": 1000
         }
     }
@@ -88,8 +88,7 @@ def main():
     print("Preparing batch requests...")
 
     # Get all agent IDs
-    agent_store = AgentStore(use_llm_agent_card=False)
-    agents = agent_store.all(shallow=True)
+    agents = Agent.all(collection="agents")
     encoding = tiktoken.encoding_for_model("gpt-4")
 
     batch_requests = []
