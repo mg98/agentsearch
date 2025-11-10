@@ -204,7 +204,7 @@ def main():
     oracle = TestOracle()
 
     # Evaluate the selected baseline
-    reports = load_data("data/new_reports.csv")
+    reports = load_data("data/reports.csv")
     # Group reports by 'question', shuffle groups, select first 10000 groups, then combine
     # question_groups = list(reports.groupby('question'))
     # np.random.shuffle(question_groups)

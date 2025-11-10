@@ -18,12 +18,21 @@ client = OpenAI()
 class Question(BaseModel):
     question: str = Field(None, title="Question")
 
-question_template = """
-Generate one question which could have been answered by the following text:
-<TEXT>
-{paper}
-</TEXT>
-Make sure to include all context needed to answer the question.
+SYSTEM_PROMPT = """
+You are generating knowledge-testing questions from scientific texts.
+
+Given the text below, write **one simple question** that could be **answered using the scientific knowledge, findings, or reasoning** contained in the text — as if the reader already understands the paper’s domain.
+
+Avoid questions about:
+- the structure or purpose of the paper
+- what the authors studied or concluded
+- generic “what is the main finding” type questions
+
+Focus on:
+- mechanisms
+- experimental observations
+- theoretical implications
+- relationships between concepts
 """
 
 def _make_task(paper):
@@ -36,8 +45,12 @@ def _make_task(paper):
             "temperature": 0,
             "messages": [
                 {
+                    "role": "system",
+                    "content": SYSTEM_PROMPT
+                },
+                {
                     "role": "user",
-                    "content": question_template.format(paper=paper.extract_text())
+                    "content": paper.extract_text()
                 }
             ],
             "response_format": {
@@ -185,55 +198,38 @@ def main():
     """Main function to orchestrate the batch processing"""
     print("Starting batch question generation...")
 
+    # deduped list of papers
     agents = Agent.all()
-    papers: list[Paper] = [paper for agent in agents for paper in agent.papers]
+    papers: list[Paper] = list({paper.id: paper for agent in agents for paper in agent.papers}.values())
 
     print(f"Loaded {len(papers)} papers")
 
-    batch_filename = create_batch_file(papers, filename="data/batch_questions.jsonl")
-
-    try:
-        file_id = upload_batch_file(batch_filename)
-        batch_id = create_batch_job(file_id)
-        batch_response = monitor_batch_job(batch_id)
-
-        if batch_response and batch_response.status == "completed":
-            results = retrieve_batch_results(batch_response)
-            save_results_to_csv(results)
-
-            print("\nBatch processing completed successfully!")
-
-        else:
-            print("Batch processing failed or was cancelled")
-
-    except Exception as e:
-        print(f"Error during batch processing: {e}")
-
-    finally:
-        if os.path.exists(batch_filename):
-            # os.remove(batch_filename)
-            print(f"Cleaned up batch file: {batch_filename}")
-
-def retrieve_batches_and_save():
-    batch_ids = [
-        "batch_690c8bd326a481909d594582607ad55a",
-        "batch_690c8f5549088190b8d63c8ae1871584",
-        "batch_690c975702a88190a3e1ce938b900672",
-        "batch_690c9b72b4b881908dfac85a3e868470",
-        "batch_690ca1529370819090bb052265437136",
-        "batch_690caafb790081908545c48787014f67",
-        "batch_690cb142020481909b964b6aa26313b7",
-        "batch_690cb76782a08190a954a68b3d9f27e2",
-    ]
+    BATCH_SIZE = 3000
+    num_batches = (len(papers) + BATCH_SIZE - 1) // BATCH_SIZE
     results = []
-    for batch_id in batch_ids:
-        batch_response = monitor_batch_job(batch_id)
-        assert batch_response.status == "completed"
-        new_results = retrieve_batch_results(batch_response)
-        results.extend(new_results)
+
+    for batch_num in range(num_batches):
+        batch_papers = papers[batch_num * BATCH_SIZE : (batch_num + 1) * BATCH_SIZE]
+        batch_filename = create_batch_file(batch_papers, filename=f"data/batch_questions_{batch_num}.jsonl")
+        try:
+            file_id = upload_batch_file(batch_filename)
+            batch_id = create_batch_job(file_id)
+            batch_response = monitor_batch_job(batch_id)
+
+            if batch_response and batch_response.status == "completed":
+                batch_results = retrieve_batch_results(batch_response)
+                results.extend(batch_results)
+                print(f"\nCompleted batch {batch_num+1}/{num_batches} ({len(batch_results)} questions)")
+            
+                os.remove(batch_filename)
+                print(f"Cleaned up batch file: {batch_filename}")
+            else:
+                print(f"Batch {batch_num+1} processing failed or was cancelled")
+
+        except Exception as e:
+            print(f"Error during batch {batch_num+1} processing: {e}")
 
     save_results_to_csv(results)
-    print("\nBatch processing completed successfully!")
 
 if __name__ == "__main__":
     main()

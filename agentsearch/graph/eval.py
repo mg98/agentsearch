@@ -2,7 +2,7 @@ import os
 import numpy as np
 import pandas as pd
 from colorama import init, Fore, Style
-from agentsearch.dataset.agents import AgentStore
+from agentsearch.dataset.agents import Agent
 from agentsearch.dataset.questions import Question
 from agentsearch.graph.utils import compute_trust_score
 
@@ -29,11 +29,8 @@ def evaluate_agent_card_matching():
     
     print(f"{Fore.GREEN}Loaded {len(test_qids)} question IDs from {test_qids_path}{Style.RESET_ALL}")
     
-    # Initialize the agent store (using LLM agent cards)
-    agent_store = AgentStore(use_llm_agent_card=False)
-    
     # Get all available agents
-    all_agents = agent_store.all(shallow=True)
+    all_agents = Agent.all(collection="agents")
     agent_ids = [agent.id for agent in all_agents]
     print(f"{Fore.CYAN}Found {len(agent_ids)} agents in the database{Style.RESET_ALL}")
     
@@ -53,7 +50,7 @@ def evaluate_agent_card_matching():
 
         # Get top-1 matched agent
         print(qid)
-        matches = agent_store.match(question, top_k=1)
+        matches = Agent.match(question, top_k=1, collection="agents")
         matched_agent = matches[0].agent
         score = compute_trust_score(matched_agent.count_sources(question.text))
         scores.append(score) 

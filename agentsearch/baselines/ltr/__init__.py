@@ -1,4 +1,4 @@
-from agentsearch.dataset.agents import AgentStore, Agent
+from agentsearch.dataset.agents import Agent
 from agentsearch.dataset.questions import Question
 from agentsearch.baselines.ltr.utils import (
     ClusterData,
@@ -36,8 +36,8 @@ def init_ltr(data: list[LTRData]) -> tuple[ClusterData, LTRModel]:
     print("Model trained")
     return cluster_data, model
 
-def ltr_match(history: list[LTRData], cluster_data: ClusterData, model: LTRModel, agent_store: AgentStore, question: Question) -> list[Agent]:
-    matches = agent_store.match(question, top_k=8)
+def ltr_match(history: list[LTRData], cluster_data: ClusterData, model: LTRModel, question: Question, collection: str = "agents") -> list[Agent]:
+    matches = Agent.match(question, top_k=8, collection=collection)
     agents = list(map(lambda m: m.agent, matches))
 
     question_context = precompute_question_context(question, cluster_data)

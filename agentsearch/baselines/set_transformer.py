@@ -2,7 +2,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from collections import defaultdict
-from agentsearch.dataset.agents import AgentStore, Agent
+from agentsearch.dataset.agents import Agent
 from agentsearch.dataset.questions import Question
 from agentsearch.utils.globals import get_torch_device
 import wandb
@@ -393,13 +393,13 @@ def init_set_transformer(data: list[SetTransformerData]) -> TabularPredictor:
 def set_transformer_match(
     history: list[SetTransformerData],
     model: TabularPredictor,
-    agent_store: AgentStore,
-    question: Question
+    question: Question,
+    collection: str = "agents"
 ) -> list[Agent]:
     device = get_torch_device()
     model.eval()
 
-    matches = agent_store.match(question, top_k=8)
+    matches = Agent.match(question, top_k=8, collection=collection)
     agents = list(map(lambda m: m.agent, matches))
 
     agent_scores = []

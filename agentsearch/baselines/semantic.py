@@ -1,6 +1,6 @@
-from agentsearch.dataset.agents import AgentStore, Agent
+from agentsearch.dataset.agents import Agent
 from agentsearch.dataset.questions import Question
 
-def semantic_match(agent_store: AgentStore, question: Question, top_k: int = 8) -> list[Agent]:
-    matches = agent_store.match(question, top_k=top_k)
+def semantic_match(question: Question, top_k: int = 8, collection: str = "agents") -> list[Agent]:
+    matches = Agent.match(question, top_k=top_k, collection=collection)
     return list(map(lambda m: m.agent, matches))

@@ -3,7 +3,7 @@ import torch.nn as nn
 import torch.optim as optim
 from transformers import DistilBertModel, DistilBertTokenizer, DistilBertConfig
 from dataclasses import dataclass
-from agentsearch.dataset.agents import agents_df, AgentStore, Agent
+from agentsearch.dataset.agents import agents_df, Agent
 from agentsearch.dataset.questions import Question
 from agentsearch.utils.globals import get_torch_device
 from sklearn.model_selection import train_test_split
@@ -302,8 +302,8 @@ def create_trained_meta_model(data: list[FORCData]) -> tuple[FORCMetaModel, FORC
         
     return model, trainer
 
-def forc_match(model: FORCMetaModel, trainer: FORCTrainer, agent_store: AgentStore, question: Question) -> list[Agent]:
-    agents = [match.agent for match in agent_store.match(question, top_k=8)]
+def forc_match(model: FORCMetaModel, trainer: FORCTrainer, question: Question, collection: str = "agents") -> list[Agent]:
+    agents = [match.agent for match in Agent.match(question, top_k=8, collection=collection)]
     inputs = [(question.text, agent.id) for agent in agents]
 
     # Process agents in batches for this question
@@ -316,10 +316,10 @@ def forc_match(model: FORCMetaModel, trainer: FORCTrainer, agent_store: AgentSto
         predictions = model(input_ids, attention_mask)
         batch_pred_probs = predictions.cpu().detach().numpy().flatten()
         question_pred_probs.extend(batch_pred_probs)
-    
+
     # Find best agent for this question
     agent_predictions = [(agent_id, pred_prob) for agent_id, pred_prob in zip([agent.id for agent in agents], question_pred_probs)]
     agent_predictions.sort(key=lambda x: x[1], reverse=True)
 
     # Return top 8 agents based on prediction probabilities
-    return list(map(lambda x: agent_store.from_id(x[0], shallow=True), agent_predictions[:8]))
+    return list(map(lambda x: Agent.from_id(x[0], collection=collection), agent_predictions[:8]))

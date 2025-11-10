@@ -15,7 +15,7 @@ from torch.optim import AdamW
 from transformers import get_linear_schedule_with_warmup
 import torch.nn.functional as F
 from sklearn.model_selection import train_test_split
-from agentsearch.dataset.agents import AgentStore, Agent
+from agentsearch.dataset.agents import Agent
 from agentsearch.dataset.questions import Question
 from agentsearch.utils.globals import get_torch_device
 
@@ -132,19 +132,20 @@ class BERTCrossEncoderReranker:
             
         return results
     
-    def rerank_with_agents(self, agent_store: AgentStore, query: str, agent_matches: list) -> list[Agent]:
+    def rerank_with_agents(self, query: str, agent_matches: list, collection: str = "agents") -> list[Agent]:
         """
         Re-rank and return agent matches with updated scores.
-        
+
         Args:
             query: The question text
             agent_matches: List of AgentMatch objects from initial retrieval
-            
+            collection: The FAISS collection to use
+
         Returns:
             List of Agent ordered by cross-encoder score (descending)
         """
         rerank_results = self.rerank(query, agent_matches, top_k=8)
-        return list(map(lambda x: agent_store.from_id(x.agent_id, shallow=True), rerank_results))
+        return list(map(lambda x: Agent.from_id(x.agent_id, collection=collection), rerank_results))
 
 
 class RerankingDataset(Dataset):
@@ -296,11 +297,11 @@ def create_trained_reranker(data: list[RerankData]) -> BERTCrossEncoderReranker:
     
     return reranker
 
-def rerank_match(reranker: BERTCrossEncoderReranker, agent_store: AgentStore, question: Question) -> list[Agent]:
-    initial_matches = agent_store.match(question, top_k=100)
+def rerank_match(reranker: BERTCrossEncoderReranker, question: Question, collection: str = "agents") -> list[Agent]:
+    initial_matches = Agent.match(question, top_k=100, collection=collection)
     reranked_agents = reranker.rerank_with_agents(
-        agent_store=agent_store,
         query=question.text,
         agent_matches=initial_matches,
+        collection=collection
     )
     return reranked_agents

@@ -10,9 +10,11 @@ class RegressiveLTRModel(nn.Module):
         super().__init__()
         self.net = nn.Sequential(
             nn.Linear(input_dim, hidden_dim),
+            nn.BatchNorm1d(hidden_dim),
             nn.ReLU(),
-            nn.Dropout(0.1),
+            nn.Dropout(0.2),
             nn.Linear(hidden_dim, hidden_dim // 2),
+            nn.BatchNorm1d(hidden_dim // 2),
             nn.ReLU(),
             nn.Dropout(0.1),
             nn.Linear(hidden_dim // 2, 1)
@@ -36,6 +38,8 @@ class RegressiveLTRModel(nn.Module):
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         x = self.normalize(x)
         output = self.net(x).squeeze(-1)
+        if self.training:
+            return output
         return torch.clamp(output, 0, 3)
 
 

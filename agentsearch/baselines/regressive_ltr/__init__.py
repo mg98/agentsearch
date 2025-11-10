@@ -1,4 +1,4 @@
-from agentsearch.dataset.agents import AgentStore, Agent
+from agentsearch.dataset.agents import Agent
 from agentsearch.dataset.questions import Question
 from agentsearch.baselines.regressive_ltr.utils import (
     ClusterData,
@@ -14,8 +14,8 @@ from tqdm import tqdm
 LTRData = tuple[Agent, Question, float]
 
 def init_regressive_ltr(data: list[LTRData]) -> tuple[ClusterData, RegressiveLTRModel]:
-    questions = list(map(lambda d: d[1], data))
-    print("Clustering questions...")
+    questions = list({d[1].id: d[1] for d in data}.values())
+    print(f"Clustering {len(questions)} questions...")
     cluster_data = ClusterData(questions)
 
     print("Precomputing question contexts...")
@@ -35,8 +35,8 @@ def init_regressive_ltr(data: list[LTRData]) -> tuple[ClusterData, RegressiveLTR
     print("Model trained")
     return cluster_data, model
 
-def regressive_ltr_match(history: list[LTRData], cluster_data: ClusterData, model: RegressiveLTRModel, agent_store: AgentStore, question: Question) -> list[Agent]:
-    matches = agent_store.match(question, top_k=8)
+def regressive_ltr_match(history: list[LTRData], cluster_data: ClusterData, model: RegressiveLTRModel, question: Question, collection: str = "agents") -> list[Agent]:
+    matches = Agent.match(question, top_k=16, collection=collection)
     agents = list(map(lambda m: m.agent, matches))
 
     question_context = precompute_question_context(question, cluster_data)
@@ -49,9 +49,11 @@ def regressive_ltr_match(history: list[LTRData], cluster_data: ClusterData, mode
     device = get_torch_device()
     X = torch.stack([feature_vector_to_tensor(fv) for fv in feature_vectors]).to(device)
 
+    model.eval()
     with torch.no_grad():
         scores = model(X).cpu().numpy()
 
     ranked_indices = sorted(range(len(scores)), key=lambda i: scores[i], reverse=True)
     ranked_agents = [agents[i] for i in ranked_indices]
+
     return ranked_agents

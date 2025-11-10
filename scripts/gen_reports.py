@@ -42,7 +42,7 @@ if __name__ == '__main__':
     random.shuffle(all_questions)
 
     test_questions = all_questions[:1000]
-    questions = all_questions[1000:11000]
+    questions = all_questions[1000:]
 
     if args.job_id == 0:
         test_qids = [str(q.id) for q in test_questions]
@@ -50,7 +50,7 @@ if __name__ == '__main__':
             f.write(','.join(test_qids))
         print(f"{Fore.CYAN}Wrote {len(test_qids)} test question IDs to data/test_qids.txt{Style.RESET_ALL}")
 
-    reports_file = f'data/new_reports_{args.job_id}.csv'
+    reports_file = f'data/reports_{args.job_id}.csv'
     questions = [q for idx, q in enumerate(questions) if idx % args.job_count == args.job_id]
 
     file_lock = threading.Lock()

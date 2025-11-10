@@ -1,5 +1,7 @@
 import fitz  # PyMuPDF
 import re
+import contextlib
+import os
 
 def is_mostly_alphabetic(text, threshold=0.8):
     """Check if more than `threshold` proportion of characters in text are alphabetical."""
@@ -43,24 +45,27 @@ def is_reference(text):
 def chunk_pdf(pdf_path, min_words=30, alphabetic_threshold=0.8) -> list[str]:
     """Extract and filter paragraphs from a PDF, removing citations and references."""
     try:
-        doc = fitz.open(pdf_path)
-        paragraphs = []
+        # Suppress MuPDF stderr warnings
+        with open(os.devnull, 'w') as devnull:
+            with contextlib.redirect_stderr(devnull):
+                doc = fitz.open(pdf_path)
+                paragraphs = []
 
-        for page in doc:
-            blocks = page.get_text("blocks")
-            for block in blocks:
-                text = block[4].strip()
-                if not text:
-                    continue
-                if is_reference(text):
-                    continue
-                text = remove_citations(text)
-                if count_words(text) >= min_words and is_mostly_alphabetic(text, alphabetic_threshold):
-                    paragraphs.append(text)
+                for page in doc:
+                    blocks = page.get_text("blocks")
+                    for block in blocks:
+                        text = block[4].strip()
+                        if not text:
+                            continue
+                        if is_reference(text):
+                            continue
+                        text = remove_citations(text)
+                        if count_words(text) >= min_words and is_mostly_alphabetic(text, alphabetic_threshold):
+                            paragraphs.append(text)
 
-        doc.close()
+                doc.close()
         return paragraphs
 
-    except Exception as e:
-        print(f"Error processing PDF: {e}")
+    except Exception:
+        # Silently handle errors - return empty list
         return []
